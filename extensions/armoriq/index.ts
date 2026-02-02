@@ -3,10 +3,7 @@ import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { ArmorIQClient } from "@armoriq/sdk";
 import { completeSimple } from "@mariozechner/pi-ai";
-import {
-  IAPVerificationService,
-  type CsrgProofHeaders,
-} from "./src/iap-verfication.service.js";
+import { IAPVerificationService, type CsrgProofHeaders } from "./src/iap-verfication.service.js";
 
 type ArmorIqConfig = {
   enabled: boolean;

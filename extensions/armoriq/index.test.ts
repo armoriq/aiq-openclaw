@@ -1,9 +1,11 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import register from "./index.js";
 
 const completeSimpleMock = vi.fn();
+const fetchMock = vi.fn();
+const ORIGINAL_ENV = { ...process.env };
 
 vi.mock("@mariozechner/pi-ai", () => ({
   completeSimple: (...args: unknown[]) => completeSimpleMock(...args),
@@ -66,6 +68,21 @@ function createCtx(runId: string) {
 describe("ArmorIQ plugin", () => {
   beforeEach(() => {
     completeSimpleMock.mockReset();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    for (const key of Object.keys(process.env)) {
+      if (!(key in ORIGINAL_ENV)) {
+        delete process.env[key];
+      }
+    }
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      }
+    }
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("captures a plan on agent start and allows matching tool calls", async () => {
@@ -160,5 +177,161 @@ describe("ArmorIQ plugin", () => {
     const result = await beforeToolCall?.({ toolName: "web_fetch", params: {} }, ctx);
     expect(result?.block).toBe(true);
     expect(result?.blockReason).toContain("intent drift");
+  });
+
+  it("allows CSRG verify-step when IAP returns allowed", async () => {
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-1",
+      agentId: "agent-1",
+      backendEndpoint: "https://iap.example",
+    });
+    register(api as any);
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          reason: "ok",
+          step: { step_index: 0, action: "web_fetch", params: {} },
+          execution_state: {
+            plan_id: "plan-1",
+            intent_reference: "plan-1",
+            executed_steps: [],
+            current_step: 0,
+            total_steps: 1,
+            status: "in_progress",
+            is_completed: false,
+          },
+        }),
+    });
+
+    const ctx = {
+      ...createCtx("run-csrg-allow"),
+      intentTokenRaw: "jwt-token",
+      csrgPath: "/steps/[0]/action",
+      csrgProofRaw: JSON.stringify([{ position: "left", sibling_hash: "abc" }]),
+      csrgValueDigest: "deadbeef",
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.(
+      { toolName: "web_fetch", params: { url: "https://example.com" } },
+      ctx,
+    );
+    expect(result?.block).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks CSRG verify-step when IAP returns denied", async () => {
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-1",
+      agentId: "agent-1",
+      backendEndpoint: "https://iap.example",
+    });
+    register(api as any);
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: false,
+          reason: "denied",
+          step: { step_index: 0, action: "web_fetch", params: {} },
+          execution_state: {
+            plan_id: "plan-1",
+            intent_reference: "plan-1",
+            executed_steps: [],
+            current_step: 0,
+            total_steps: 1,
+            status: "blocked",
+            is_completed: false,
+          },
+        }),
+    });
+
+    const ctx = {
+      ...createCtx("run-csrg-deny"),
+      intentTokenRaw: "jwt-token",
+      csrgPath: "/steps/[0]/action",
+      csrgProofRaw: JSON.stringify([{ position: "left", sibling_hash: "abc" }]),
+      csrgValueDigest: "deadbeef",
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.({ toolName: "web_fetch", params: {} }, ctx);
+    expect(result?.block).toBe(true);
+    expect(result?.blockReason).toContain("denied");
+  });
+
+  it("blocks CSRG verification when proofs are required but missing", async () => {
+    process.env.REQUIRE_CSRG_PROOFS = "true";
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-1",
+      agentId: "agent-1",
+      backendEndpoint: "https://iap.example",
+    });
+    register(api as any);
+
+    const ctx = {
+      ...createCtx("run-csrg-missing"),
+      intentTokenRaw: "jwt-token",
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.({ toolName: "web_fetch", params: {} }, ctx);
+    expect(result?.block).toBe(true);
+    expect(result?.blockReason).toContain("CSRG proof headers missing");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows CSRG verification when proofs are optional and missing", async () => {
+    process.env.REQUIRE_CSRG_PROOFS = "false";
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-1",
+      agentId: "agent-1",
+      backendEndpoint: "https://iap.example",
+    });
+    register(api as any);
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          reason: "ok",
+          step: { step_index: 0, action: "web_fetch", params: {} },
+          execution_state: {
+            plan_id: "plan-1",
+            intent_reference: "plan-1",
+            executed_steps: [],
+            current_step: 0,
+            total_steps: 1,
+            status: "in_progress",
+            is_completed: false,
+          },
+        }),
+    });
+
+    const ctx = {
+      ...createCtx("run-csrg-optional"),
+      intentTokenRaw: "jwt-token",
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.({ toolName: "web_fetch", params: {} }, ctx);
+    expect(result?.block).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

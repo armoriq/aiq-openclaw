@@ -92,8 +92,7 @@ type JsonResponse<T> = {
   text: string;
 };
 
-const DEFAULT_CSRG_URL =
-  "https://csrg-execution-service-staging-969432608491.us-central1.run.app";
+const DEFAULT_CSRG_URL = "https://csrg-execution-service-staging-969432608491.us-central1.run.app";
 
 function resolveIapBaseUrl(fallback?: string): string {
   const configured = process.env.IAP_BACKEND_URL || process.env.CONMAP_AUTO_URL;
@@ -185,9 +184,7 @@ export class IAPVerificationService {
         `IAP_BACKEND_URL not set; defaulting to local backend at ${this.iapBaseUrl}`,
       );
     }
-    this.logger.info(
-      `IAP Verification Service initialized - Base URL: ${this.iapBaseUrl}`,
-    );
+    this.logger.info(`IAP Verification Service initialized - Base URL: ${this.iapBaseUrl}`);
     this.logger.info(`CSRG Verification URL: ${this.csrgBaseUrl}`);
     if (this.requireCsrgProofs) {
       this.logger.info("CSRG proof headers are REQUIRED for tool execution");
@@ -304,8 +301,7 @@ export class IAPVerificationService {
       return {
         allowed: false,
         reason:
-          response.data.reason ||
-          `CSRG verification failed: ${response.text || "unknown error"}`,
+          response.data.reason || `CSRG verification failed: ${response.text || "unknown error"}`,
       };
     }
 
