@@ -1236,9 +1236,22 @@ export default function register(api: OpenClawPluginApi) {
         return { block: true, blockReason: proofError };
       }
 
+      let verifyToken = tokenRaw;
+      try {
+        const parsed = JSON.parse(tokenRaw);
+        if (parsed?.jwtToken) {
+          verifyToken = parsed.jwtToken;
+          api.logger.info(`armoriq: using jwtToken for verification (length=${verifyToken.length})`);
+        } else {
+          api.logger.warn(`armoriq: no jwtToken in token, using raw (keys=${Object.keys(parsed).join(',')})`);
+        }
+      } catch {
+        api.logger.warn(`armoriq: failed to parse tokenRaw, using as-is`);
+      }
+
       try {
         const verifyResult = await verificationService.verifyStep(
-          tokenRaw,
+          verifyToken,
           proofs,
           event.toolName,
         );
