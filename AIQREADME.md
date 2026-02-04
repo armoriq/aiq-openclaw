@@ -12,8 +12,10 @@ the current product framing, and the remaining work to ship a full "intent firew
   ArmorIQ IAP backend via the SDK to obtain an intent token.
 - **Fail-closed tool enforcement**: Every tool call is intercepted in `before_tool_call`. If the
   plan/token is missing or invalid, or the tool is not in the plan, execution is blocked.
-- **/tools/invoke path**: HTTP invokes can supply `x-armoriq-intent-token`. If missing and the run
-  is an auto `http-*` run, the plugin can mint a minimal single-step plan and token for that tool.
+- **Policy enforcement**: Tool calls are evaluated against a local policy store. Policy denies or
+  approval-required rules block execution even when the tool is in the plan.
+- **/tools/invoke path**: HTTP invokes can supply `x-armoriq-intent-token`. If missing and there is
+  no cached run plan, the plugin blocks the call.
 - **CSRG/IAP verification**: If `/tools/invoke` passes a CSRG JWT in `x-armoriq-intent-token`, the
   plugin verifies each tool call against the IAP backend (`/iap/verify-step`) and optional CSRG
   proof headers (`x-csrg-path`, `x-csrg-proof`, `x-csrg-value-digest`). Failures are block/deny.
@@ -52,10 +54,14 @@ Notes:
 - **Tool allowlist**: only tool actions in the plan are allowed.
 - **Token expiry**: tool calls are blocked after token expiration.
 - **Intent drift**: tool calls not in the plan are blocked.
+- **Policy layer**: policy rules (deny/require_approval) are evaluated before tool execution. Basic
+  PCI/payment data classification is applied to tool params to support policy matching.
 - **CSRG proofs**: when `REQUIRE_CSRG_PROOFS=true`, missing/invalid CSRG proof headers block tool
   execution for `/tools/invoke`.
 - **IAP verify-step**: when a CSRG JWT is provided, the plugin blocks tool calls if
   `/iap/verify-step` returns `allowed=false` or errors.
+- **Policy updates**: when enabled, the `policy_update` tool accepts Zod-validated JSON updates and
+  writes them to the policy store with versioned audit history.
 
 ## Where It Lives (Code)
 
@@ -145,6 +151,9 @@ plugins:
       policy:
         allow: ["*"]
         deny: []
+      policyStorePath: "./armoriq.policy.json"
+      policyUpdateEnabled: false
+      policyUpdateAllowList: ["+15550001111"]
       validitySeconds: 60
 
       # Optional endpoints (defaults to production)
@@ -169,6 +178,9 @@ Example config (JSON):
         "agentId": "agent-456",
         "contextId": "default",
         "policy": { "allow": ["*"], "deny": [] },
+        "policyStorePath": "./armoriq.policy.json",
+        "policyUpdateEnabled": false,
+        "policyUpdateAllowList": ["+15550001111"],
         "validitySeconds": 60,
         "iapEndpoint": "https://customer-iap.armoriq.ai",
         "proxyEndpoint": "https://customer-proxy.armoriq.ai",

@@ -330,4 +330,86 @@ describe("POST /tools/invoke", () => {
 
     await server.close();
   });
+
+  it("uses runId from request body when header is not provided", async () => {
+    testState.agentsConfig = {
+      list: [
+        {
+          id: "main",
+          tools: {
+            allow: ["agents_list"],
+          },
+        },
+      ],
+    } as any;
+
+    const port = await getFreePort();
+    const server = await startGatewayServer(port, {
+      bind: "loopback",
+    });
+    const token = resolveGatewayToken();
+
+    const customRunId = "test-run-123";
+    const res = await fetch(`http://127.0.0.1:${port}/tools/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        tool: "agents_list",
+        action: "json",
+        args: {},
+        sessionKey: "main",
+        runId: customRunId,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+
+    await server.close();
+  });
+
+  it("prefers header runId over body runId", async () => {
+    testState.agentsConfig = {
+      list: [
+        {
+          id: "main",
+          tools: {
+            allow: ["agents_list"],
+          },
+        },
+      ],
+    } as any;
+
+    const port = await getFreePort();
+    const server = await startGatewayServer(port, {
+      bind: "loopback",
+    });
+    const token = resolveGatewayToken();
+
+    const headerRunId = "header-run-456";
+    const bodyRunId = "body-run-789";
+
+    const res = await fetch(`http://127.0.0.1:${port}/tools/invoke`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "x-openclaw-run-id": headerRunId,
+      },
+      body: JSON.stringify({
+        tool: "agents_list",
+        action: "json",
+        args: {},
+        sessionKey: "main",
+        runId: bodyRunId,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+
+    await server.close();
+  });
 });

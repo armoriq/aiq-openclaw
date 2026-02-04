@@ -1,0 +1,185 @@
+{
+  "version": 8,
+  "updatedAt": "2026-02-04T13:44:08.767Z",
+  "updatedBy": "main",
+  "policy": {
+    "rules": [
+      {
+        "id": "allow-all",
+        "action": "allow",
+        "tool": "*"
+      }
+    ]
+  },
+  "history": [
+    {
+      "version": 1,
+      "updatedAt": "2026-02-04T08:10:52.496Z",
+      "updatedBy": "main",
+      "reason": "User policy update",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          }
+        ]
+      }
+    },
+    {
+      "version": 2,
+      "updatedAt": "2026-02-04T12:12:46.916Z",
+      "updatedBy": "main",
+      "reason": "User policy update",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          }
+        ]
+      }
+    },
+    {
+      "version": 3,
+      "updatedAt": "2026-02-04T12:48:16.373Z",
+      "updatedBy": "main",
+      "reason": "User policy update: Policy update: block send_email for payment data",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          },
+          {
+            "id": "update",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          }
+        ]
+      }
+    },
+    {
+      "version": 4,
+      "updatedAt": "2026-02-04T12:48:41.135Z",
+      "updatedBy": "main",
+      "reason": "User policy update: Policy update: block upload_file for PII",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          },
+          {
+            "id": "update",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PII"
+          }
+        ]
+      }
+    },
+    {
+      "version": 5,
+      "updatedAt": "2026-02-04T13:39:19.342Z",
+      "updatedBy": "main",
+      "reason": "User policy update: Policy new: block upload_file for PII",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          },
+          {
+            "id": "update",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PII"
+          },
+          {
+            "id": "policy1",
+            "action": "deny",
+            "tool": "upload_file",
+            "dataClass": "PII"
+          }
+        ]
+      }
+    },
+    {
+      "version": 6,
+      "updatedAt": "2026-02-04T13:42:46.235Z",
+      "updatedBy": "main",
+      "reason": "User policy update: Policy update policy1: allow upload_file for PII",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          },
+          {
+            "id": "update",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PII"
+          },
+          {
+            "id": "policy1",
+            "action": "allow",
+            "tool": "upload_file",
+            "dataClass": "PII"
+          }
+        ]
+      }
+    },
+    {
+      "version": 7,
+      "updatedAt": "2026-02-04T13:43:24.056Z",
+      "updatedBy": "main",
+      "reason": "Policy delete: Policy delete policy1",
+      "policy": {
+        "rules": [
+          {
+            "id": "block-all-credit-card-or-payment-access",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PAYMENT"
+          },
+          {
+            "id": "update",
+            "action": "deny",
+            "tool": "*",
+            "dataClass": "PII"
+          }
+        ]
+      }
+    },
+    {
+      "version": 8,
+      "updatedAt": "2026-02-04T13:44:08.767Z",
+      "updatedBy": "main",
+      "reason": "Policy reset: Policy reset",
+      "policy": {
+        "rules": [
+          {
+            "id": "allow-all",
+            "action": "allow",
+            "tool": "*"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -339,6 +339,15 @@ async function runInvoke() {
   const segmentList = parseSegments(readFlagValue(parsed.args, "--segment"));
   const messageChannel = process.env.AIQ_DEMO_MESSAGE_CHANNEL?.trim();
 
+  console.log("\n=== ArmorIQ Intent Enforcement Demo ===");
+  console.log("Enforcement happens in the OpenClaw plugin's before_tool_call hook.");
+  console.log(`Gateway URL: ${gatewayUrl}`);
+  console.log("\nFlow:");
+  console.log("  1. Demo calls OpenClaw Gateway /tools/invoke");
+  console.log("  2. Gateway triggers ArmorIQ plugin hooks");
+  console.log("  3. Plugin's before_tool_call validates intent token");
+  console.log("  4. Tool blocked if not in plan (intent drift)");
+
   const baseHeaders: Record<string, string> = {
     Authorization: `Bearer ${gatewayToken}`,
     "Content-Type": "application/json",
@@ -352,7 +361,15 @@ async function runInvoke() {
     args: { url: "https://example.com" },
   };
 
-  const runSegment = async (segment: SegmentId, headers: Record<string, string>) => {
+  const runSegment = async (segment: SegmentId, headers: Record<string, string>, description: string) => {
+    console.log(`\\n--- Segment ${segment.toUpperCase()}: ${description} ---`);
+    const hasToken = headers["x-armoriq-intent-token"] !== undefined;
+    const hasCsrgProofs = headers["x-csrg-proof"] !== undefined;
+    console.log(`Intent Token: ${hasToken ? "✓ present" : "✗ none"}`);
+    console.log(`CSRG Proofs: ${hasCsrgProofs ? "✓ present" : "✗ none"}`);
+    console.log(`Calling: POST ${gatewayUrl}/tools/invoke`);
+    console.log(`Tool: ${requestBody.tool}`);
+
     const response = await fetch(`${gatewayUrl}/tools/invoke`, {
       method: "POST",
       headers,
@@ -365,8 +382,8 @@ async function runInvoke() {
     } catch {
       parsedJson = text;
     }
-    console.log(`\nSegment ${segment.toUpperCase()}`);
-    console.log(`Status: ${response.status}`);
+    const statusIcon = response.status < 400 ? "✓" : "✗";
+    console.log(`\\nResult: ${statusIcon} HTTP ${response.status}`);
     console.log(
       typeof parsedJson === "string" ? parsedJson : JSON.stringify(parsedJson, null, 2),
     );
@@ -374,16 +391,18 @@ async function runInvoke() {
 
   for (const segment of segmentList) {
     if (segment === "5a") {
-      await runSegment("5a", { ...baseHeaders });
+      await runSegment("5a", { ...baseHeaders }, "No intent token (should be blocked by plugin)");
       continue;
     }
     if (segment === "5b") {
       try {
+        console.log("\\nMinting intent token from IAP service...");
         const intentToken = await mintIntentToken(requestBody.tool, requestBody.args);
+        console.log("✓ Token issued with plan containing web_fetch");
         await runSegment("5b", {
           ...baseHeaders,
           "x-armoriq-intent-token": JSON.stringify(intentToken),
-        });
+        }, "With valid intent token (should be allowed)");
         continue;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -395,27 +414,29 @@ async function runInvoke() {
       }
     }
     if (segment === "5c") {
-      await runSegment("5c", { ...baseHeaders, "x-openclaw-run-id": "demo-no-plan" });
+      await runSegment("5c", { ...baseHeaders, "x-openclaw-run-id": "demo-no-plan" }, "No intent token, custom run-id (should be blocked)");
       continue;
     }
     if (segment === "5d") {
       try {
+        console.log("\\nMinting intent token with CSRG proofs...");
         const intentToken = await mintIntentToken(requestBody.tool, requestBody.args);
         const csrgHeaders = buildCsrgHeaders(intentToken, requestBody.tool, 0);
         if (!csrgHeaders) {
           console.error("Segment 5D: no CSRG proofs returned from IAP.");
-          console.log("\nSegment 5D");
+          console.log("\\nSegment 5D");
           console.log("Status: skipped");
           console.log("No CSRG proofs captured from IAP.");
           continue;
         }
+        console.log("✓ Token issued with CSRG Merkle proofs");
         await runSegment("5d", {
           ...baseHeaders,
           "x-armoriq-intent-token": JSON.stringify(intentToken),
           "x-csrg-path": csrgHeaders.path,
           "x-csrg-proof": csrgHeaders.proof,
           "x-csrg-value-digest": csrgHeaders.valueDigest,
-        });
+        }, "With intent token + CSRG proofs (cryptographic verification)");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`Segment 5D: no intent captured (${message})`);

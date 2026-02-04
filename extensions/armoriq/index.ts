@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
+import { Type } from "@sinclair/typebox";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { ArmorIQClient } from "@armoriq/sdk";
 import { completeSimple } from "@mariozechner/pi-ai";
 import { IAPVerificationService, type CsrgProofHeaders } from "./src/iap-verfication.service.js";
+import {
+  PolicyStore,
+  PolicyUpdateSchema,
+  evaluatePolicy,
+  normalizePolicyDefinition,
+  type PolicyUpdate,
+  type PolicyRule,
+  type PolicyDataClass,
+} from "./src/policy.js";
 
 type ArmorIqConfig = {
   enabled: boolean;
@@ -22,6 +32,9 @@ type ArmorIqConfig = {
   agentIdSource?: "agentId" | "sessionKey";
   contextIdSource?: "sessionKey" | "agentId" | "channel" | "accountId";
   policy?: Record<string, unknown>;
+  policyStorePath?: string;
+  policyUpdateEnabled?: boolean;
+  policyUpdateAllowList?: string[];
   validitySeconds: number;
   useProduction?: boolean;
   iapEndpoint?: string;
@@ -77,12 +90,99 @@ const DEFAULT_MAX_PARAM_CHARS = 2000;
 const DEFAULT_MAX_PARAM_DEPTH = 4;
 const DEFAULT_MAX_PARAM_KEYS = 50;
 const DEFAULT_MAX_PARAM_ITEMS = 50;
+const POLICY_ACTIONS = ["allow", "deny", "require_approval"] as const;
+const POLICY_SCOPES = ["org", "project", "run"] as const;
+const POLICY_DATA_CLASSES = ["PCI", "PAYMENT", "PHI", "PII"] as const;
+const POLICY_UPDATE_INSTRUCTIONS = `Policy updates:
+- When the user asks to update, list, delete, or reset policy (e.g. "Policy update policy2: ...", "Policy list"), call the policy_update tool immediately.
+- Pass the user's plain-text request via the tool parameter "text" (do NOT emit JSON to the user).
+- Require an explicit policy id for updates (policy1, policy2, etc.). If missing, ask them to run "Policy list" or use "Policy new: ...".
+- Use "Policy new: ..." to create a new rule with the next policy id.
+- If details are missing, infer reasonable defaults: reason="User policy update", mode="merge", tool="*", action="deny" for "block/disallow" intents.
+- For "credit card" or "payment" requests, set dataClass to PCI or PAYMENT.
+- Only use policy_update for explicit policy changes.
+- If the user asks for help/commands, return the policy command cheat-sheet.`;
 
 const clientCache = new Map<string, ArmorIQClient>();
 const planCache = new Map<string, PlanCacheEntry>();
 
+function stringEnum<T extends readonly string[]>(
+  values: T,
+  options: { description?: string } = {},
+) {
+  return Type.Unsafe<T[number]>({
+    type: "string",
+    enum: [...values],
+    ...options,
+  });
+}
+
+const PolicyRuleToolSchema = Type.Object(
+  {
+    id: Type.String({ description: "Unique rule id" }),
+    action: stringEnum(POLICY_ACTIONS, { description: "allow, deny, or require_approval" }),
+    tool: Type.String({ description: "Tool name or *" }),
+    dataClass: Type.Optional(stringEnum(POLICY_DATA_CLASSES)),
+    params: Type.Optional(Type.Object({}, { additionalProperties: true })),
+    scope: Type.Optional(stringEnum(POLICY_SCOPES)),
+  },
+  { additionalProperties: false },
+);
+
+const PolicyUpdateToolSchema = Type.Object(
+  {
+    text: Type.Optional(
+      Type.String({
+        description: "Plain-language policy command (update/list/delete/reset).",
+      }),
+    ),
+    update: Type.Optional(
+      Type.Object(
+        {
+          reason: Type.String({ description: "Why this policy change is needed" }),
+          rules: Type.Array(PolicyRuleToolSchema, { minItems: 1 }),
+          mode: Type.Optional(stringEnum(["replace", "merge"] as const)),
+          scope: Type.Optional(stringEnum(POLICY_SCOPES)),
+          expiresAt: Type.Optional(Type.Number({ description: "Unix timestamp (seconds)" })),
+          actor: Type.Optional(Type.String({ description: "Optional actor label" })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value.trim() || undefined : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((entry) => {
+        if (typeof entry === "string") {
+          return entry.trim();
+        }
+        if (typeof entry === "number" && Number.isFinite(entry)) {
+          return String(entry);
+        }
+        return "";
+      })
+      .filter(Boolean);
+    return items.length > 0 ? items : undefined;
+  }
+  if (typeof value === "string") {
+    const items = value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    return items.length > 0 ? items : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return [String(value)];
+  }
+  return undefined;
 }
 
 function readNumber(value: unknown): number | undefined {
@@ -100,6 +200,262 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+type PolicyState = ReturnType<PolicyStore["getState"]>;
+type PolicyCommand =
+  | { kind: "list" }
+  | { kind: "get"; id: string }
+  | { kind: "help" }
+  | { kind: "need_id" }
+  | { kind: "delete"; ids: string[]; reason: string }
+  | { kind: "reset"; reason: string }
+  | { kind: "update"; update: PolicyUpdate };
+
+function truncateReason(text: string, max = 160): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, max)}...`;
+}
+
+function slugifyRuleId(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function formatPolicyRule(rule: PolicyRule): string {
+  const parts = [`id=${rule.id}`, `action=${rule.action}`, `tool=${rule.tool}`];
+  if (rule.dataClass) {
+    parts.push(`dataClass=${rule.dataClass}`);
+  }
+  if (rule.scope) {
+    parts.push(`scope=${rule.scope}`);
+  }
+  return parts.join(" ");
+}
+
+function formatPolicyHelp(): string {
+  return [
+    "Policy commands (7):",
+    "1. Policy list: list all rules",
+    "2. Policy get policy1: show one rule by id",
+    "3. Policy delete policy1: remove a rule by id",
+    "4. Policy reset: replace all rules with allow-all",
+    "5. Policy update policy1: block send_email for payment data",
+    "6. Policy update policy2: allow write_file",
+    "7. Policy new: block upload_file for PII (creates new policyN)",
+  ].join("\n");
+}
+
+function formatPolicyNeedId(): string {
+  return [
+    "Policy update needs a policy id.",
+    "Use: Policy list (to see ids), then:",
+    "- Policy update policy2: <your change>",
+    "Or create a new rule with:",
+    "- Policy new: <your rule>",
+  ].join("\n");
+}
+
+function formatPolicyList(state: PolicyState): string {
+  if (!state.policy.rules.length) {
+    return `Policy version ${state.version}. No rules configured.`;
+  }
+  const sorted = [...state.policy.rules].sort((a, b) => {
+    const aMatch = a.id.match(/^policy(\d+)$/i);
+    const bMatch = b.id.match(/^policy(\d+)$/i);
+    if (aMatch && bMatch) {
+      return Number.parseInt(aMatch[1] ?? "0", 10) - Number.parseInt(bMatch[1] ?? "0", 10);
+    }
+    if (aMatch) return -1;
+    if (bMatch) return 1;
+    return a.id.localeCompare(b.id);
+  });
+  const lines = sorted.map(
+    (rule, idx) => `${idx + 1}. ${formatPolicyRule(rule)}`,
+  );
+  return `Policy version ${state.version}:\n${lines.join("\n")}`;
+}
+
+function nextPolicyId(state: PolicyState): string {
+  const ids = state.policy.rules
+    .map((rule) => rule.id)
+    .map((id) => {
+      const match = id.match(/^policy(\d+)$/i);
+      return match ? Number.parseInt(match[1] ?? "", 10) : null;
+    })
+    .filter((value): value is number => Number.isFinite(value));
+  const max = ids.length ? Math.max(...ids) : 0;
+  return `policy${max + 1}`;
+}
+
+function extractPolicyIdsFromText(text: string, state: PolicyState): string[] {
+  const ids = new Set<string>();
+  const policyNumeric = [...text.matchAll(/\bpolicy[-_]?(\d+)\b/gi)];
+  for (const match of policyNumeric) {
+    const num = match[1];
+    if (num) {
+      ids.add(`policy${num}`);
+    }
+  }
+
+  const updateNumeric = [...text.matchAll(/\bupdate\s+(\d+)\b/gi)];
+  for (const match of updateNumeric) {
+    const num = match[1];
+    if (num) {
+      ids.add(`policy${num}`);
+    }
+  }
+
+  const ruleMatches = [...text.matchAll(/\brule\s*[:#]?\s*([a-z0-9][\w.-]*)/gi)];
+  for (const match of ruleMatches) {
+    const raw = match[1];
+    if (raw) {
+      ids.add(raw);
+    }
+  }
+
+  const idMatches = [...text.matchAll(/\bid\s*[:#]?\s*([a-z0-9][\w.-]*)/gi)];
+  for (const match of idMatches) {
+    const raw = match[1];
+    if (raw) {
+      ids.add(raw);
+    }
+  }
+
+  for (const rule of state.policy.rules) {
+    if (text.includes(rule.id)) {
+      ids.add(rule.id);
+    }
+  }
+  return Array.from(ids);
+}
+
+function inferPolicyAction(text: string): "allow" | "deny" | "require_approval" {
+  const lower = text.toLowerCase();
+  if (/(require\s+approval|needs\s+approval|approval\s+required)/i.test(lower)) {
+    return "require_approval";
+  }
+  if (/(allow|permit|enable|whitelist)/i.test(lower)) {
+    return "allow";
+  }
+  if (/(deny|block|disallow|prevent|prohibit|stop)/i.test(lower)) {
+    return "deny";
+  }
+  return "deny";
+}
+
+function inferPolicyDataClass(text: string): PolicyDataClass | undefined {
+  const lower = text.toLowerCase();
+  if (/(credit\s*card|card\s*number|pci)/i.test(lower)) {
+    return "PCI";
+  }
+  if (/(payment|billing|bank|iban|swift|routing)/i.test(lower)) {
+    return "PAYMENT";
+  }
+  if (/(phi|health|patient|medical)/i.test(lower)) {
+    return "PHI";
+  }
+  if (/(pii|ssn|personal\s+data|identity)/i.test(lower)) {
+    return "PII";
+  }
+  return undefined;
+}
+
+function inferPolicyTool(text: string): string {
+  const lower = text.toLowerCase();
+  if (/(all\s+tools|any\s+tool|\*\b)/i.test(lower)) {
+    return "*";
+  }
+  const backtickMatch = text.match(/`([a-z0-9_.:-]+)`/i);
+  if (backtickMatch?.[1]) {
+    return backtickMatch[1];
+  }
+  const toolMatch = text.match(/\btool\s*[:=]?\s*([a-z0-9_.:-]+)/i);
+  if (toolMatch?.[1]) {
+    return toolMatch[1];
+  }
+  const actionMatch = text.match(/\b(block|deny|allow|disallow|permit|require)\s+([a-z0-9_.:-]+)/i);
+  if (actionMatch?.[2]) {
+    return actionMatch[2];
+  }
+  const forMatch = text.match(/\bfor\s+([a-z0-9_.:-]+)\s+tool\b/i);
+  if (forMatch?.[1]) {
+    return forMatch[1];
+  }
+  return "*";
+}
+
+function buildPolicyUpdateFromText(text: string, state: PolicyState): PolicyUpdate {
+  const action = inferPolicyAction(text);
+  const dataClass = inferPolicyDataClass(text);
+  const tool = inferPolicyTool(text);
+  const explicitIds = extractPolicyIdsFromText(text, state);
+  const ruleId = explicitIds[0] ?? nextPolicyId(state);
+  return {
+    reason: truncateReason(`User policy update: ${text}`),
+    mode: /replace/i.test(text) ? "replace" : "merge",
+    rules: [
+      {
+        id: ruleId,
+        action,
+        tool,
+        dataClass,
+      },
+    ],
+  };
+}
+
+function parsePolicyTextCommand(text: string, state: PolicyState): PolicyCommand {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  const ids = extractPolicyIdsFromText(trimmed, state);
+
+  if (/\b(help|commands|prompt)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
+    return { kind: "help" };
+  }
+  if (/\b(new|create|add)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
+    return { kind: "update", update: buildPolicyUpdateFromText(trimmed, state) };
+  }
+  if (/\b(list|show|view)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
+    return { kind: "list" };
+  }
+  if (/\b(get|show|view)\b/.test(lower) && ids.length === 1) {
+    return { kind: "get", id: ids[0] };
+  }
+  if (/\b(reset|clear\s+all|wipe)\b/.test(lower)) {
+    return { kind: "reset", reason: truncateReason(`Policy reset: ${trimmed}`) };
+  }
+  if (/\b(delete|remove|undo|revert)\b/.test(lower)) {
+    if (ids.length > 0) {
+      return {
+        kind: "delete",
+        ids,
+        reason: truncateReason(`Policy delete: ${trimmed}`),
+      };
+    }
+    const dataClass = inferPolicyDataClass(trimmed);
+    if (dataClass) {
+      const matches = state.policy.rules.filter((rule) => rule.dataClass === dataClass);
+      if (matches.length > 0) {
+        return {
+          kind: "delete",
+          ids: matches.map((rule) => rule.id),
+          reason: truncateReason(`Policy delete: ${trimmed}`),
+        };
+      }
+    }
+  }
+  if (/\bupdate\b/.test(lower) && ids.length === 0) {
+    return { kind: "need_id" };
+  }
+  return { kind: "update", update: buildPolicyUpdateFromText(trimmed, state) };
+}
+
 function resolveConfig(api: OpenClawPluginApi): ArmorIqConfig {
   const raw = readRecord(api.pluginConfig) ?? {};
   const enabled = readBoolean(raw.enabled) ?? false;
@@ -113,6 +469,14 @@ function resolveConfig(api: OpenClawPluginApi): ArmorIqConfig {
     agentIdSource: readString(raw.agentIdSource) as ArmorIqConfig["agentIdSource"],
     contextIdSource: readString(raw.contextIdSource) as ArmorIqConfig["contextIdSource"],
     policy: readRecord(raw.policy),
+    policyStorePath:
+      readString(raw.policyStorePath) ?? readString(process.env.ARMORIQ_POLICY_STORE_PATH),
+    policyUpdateEnabled:
+      readBoolean(raw.policyUpdateEnabled) ??
+      readBoolean(process.env.ARMORIQ_POLICY_UPDATE_ENABLED),
+    policyUpdateAllowList:
+      readStringArray(raw.policyUpdateAllowList) ??
+      readStringArray(process.env.ARMORIQ_POLICY_UPDATE_ALLOWLIST),
     validitySeconds: readNumber(raw.validitySeconds) ?? DEFAULT_VALIDITY_SECONDS,
     useProduction: readBoolean(raw.useProduction),
     iapEndpoint: readString(raw.iapEndpoint) ?? readString(process.env.IAP_ENDPOINT),
@@ -127,6 +491,50 @@ function resolveConfig(api: OpenClawPluginApi): ArmorIqConfig {
     maxParamKeys: readNumber(raw.maxParamKeys) ?? DEFAULT_MAX_PARAM_KEYS,
     maxParamItems: readNumber(raw.maxParamItems) ?? DEFAULT_MAX_PARAM_ITEMS,
   };
+}
+
+function resolvePolicyStorePath(api: OpenClawPluginApi, cfg: ArmorIqConfig): string {
+  const rawPath = cfg.policyStorePath?.trim() || "armoriq.policy.json";
+  return api.resolvePath ? api.resolvePath(rawPath) : rawPath;
+}
+
+function isPolicyUpdateAllowed(cfg: ArmorIqConfig, ctx: ToolContext): {
+  allowed: boolean;
+  reason?: string;
+  candidates?: string[];
+} {
+  if (!cfg.policyUpdateEnabled) {
+    return { allowed: false, reason: "ArmorIQ policy updates disabled" };
+  }
+  const allowList = cfg.policyUpdateAllowList ?? [];
+  if (allowList.includes("*")) {
+    return { allowed: true };
+  }
+  if (allowList.length === 0) {
+    return { allowed: false, reason: "ArmorIQ policy updates not allowed" };
+  }
+  const candidates = [
+    ctx.senderE164,
+    ctx.senderId,
+    ctx.senderUsername,
+    ctx.senderName,
+    ctx.sessionKey,
+    ctx.agentId,
+  ]
+    .map((value) => {
+      if (typeof value === "string") {
+        return value.trim();
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return String(value);
+      }
+      return "";
+    })
+    .filter(Boolean) as string[];
+  const allowed = candidates.some((candidate) => allowList.includes(candidate));
+  return allowed
+    ? { allowed: true, candidates }
+    : { allowed: false, reason: "ArmorIQ policy update denied", candidates };
 }
 
 function resolveUserId(cfg: ArmorIqConfig, ctx: ToolContext): string | undefined {
@@ -203,11 +611,15 @@ function resolveIdentities(cfg: ArmorIqConfig, ctx: ToolContext): IdentityBundle
 
 function resolveRunKey(ctx: ToolContext): string | null {
   const runId = ctx.runId?.trim();
+  const sessionKey = ctx.sessionKey?.trim();
+  
   if (runId) {
-    const sessionKey = ctx.sessionKey?.trim();
-    return sessionKey ? `${sessionKey}::${runId}` : runId;
+    if (sessionKey && sessionKey !== runId) {
+      return `${sessionKey}::${runId}`;
+    }
+    return runId;
   }
-  return null;
+  return sessionKey || null;
 }
 
 function normalizeToolName(value: string): string {
@@ -266,9 +678,51 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function findPlanStepIndex(plan: Record<string, unknown>, toolName: string): number | null {
+function isSubsetValue(needle: unknown, haystack: unknown): boolean {
+  if (needle === haystack) {
+    return true;
+  }
+  if (typeof needle !== typeof haystack) {
+    return false;
+  }
+  if (needle && typeof needle === "object") {
+    if (Array.isArray(needle)) {
+      if (!Array.isArray(haystack) || needle.length !== haystack.length) {
+        return false;
+      }
+      for (let idx = 0; idx < needle.length; idx += 1) {
+        if (!isSubsetValue(needle[idx], (haystack as unknown[])[idx])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (!haystack || typeof haystack !== "object" || Array.isArray(haystack)) {
+      return false;
+    }
+    const haystackRecord = haystack as Record<string, unknown>;
+    for (const [key, value] of Object.entries(needle as Record<string, unknown>)) {
+      if (!(key in haystackRecord)) {
+        return false;
+      }
+      if (!isSubsetValue(value, haystackRecord[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function findPlanStepIndices(
+  plan: Record<string, unknown>,
+  toolName: string,
+  toolParams?: Record<string, unknown>,
+): { matches: number[]; paramMatches: number[] } {
   const steps = Array.isArray(plan.steps) ? plan.steps : [];
   const normalizedTool = normalizeToolName(toolName);
+  const matches: number[] = [];
+  const paramMatches: number[] = [];
   for (let idx = 0; idx < steps.length; idx += 1) {
     const step = steps[idx];
     if (!step || typeof step !== "object") {
@@ -280,11 +734,22 @@ function findPlanStepIndex(plan: Record<string, unknown>, toolName: string): num
         : typeof (step as { tool?: unknown }).tool === "string"
           ? String((step as { tool?: unknown }).tool)
           : "";
-    if (normalizeToolName(action) === normalizedTool) {
-      return idx;
+    if (normalizeToolName(action) !== normalizedTool) {
+      continue;
+    }
+    matches.push(idx);
+    if (toolParams) {
+      const metadata = (step as { metadata?: unknown }).metadata;
+      const inputs =
+        metadata && typeof metadata === "object" && !Array.isArray(metadata)
+          ? (metadata as Record<string, unknown>).inputs
+          : undefined;
+      if (inputs && isPlainObject(inputs) && isSubsetValue(inputs, toolParams)) {
+        paramMatches.push(idx);
+      }
     }
   }
-  return null;
+  return { matches, paramMatches };
 }
 
 function readStepProofsFromToken(tokenObj: Record<string, unknown>): unknown[] | null {
@@ -331,6 +796,18 @@ function resolveStepProofEntry(
   return null;
 }
 
+function parseStepIndexFromPath(path?: string): number | null {
+  if (!path) {
+    return null;
+  }
+  const match = path.match(/\/steps\/\[(\d+)\]/);
+  if (!match) {
+    return null;
+  }
+  const index = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(index) ? index : null;
+}
+
 function resolveCsrgProofsFromToken(params: {
   intentTokenRaw: string;
   plan: Record<string, unknown>;
@@ -352,9 +829,46 @@ function resolveCsrgProofsFromToken(params: {
     return null;
   }
   const steps = Array.isArray(params.plan.steps) ? params.plan.steps : [];
-  const stepIndex = findPlanStepIndex(params.plan, params.toolName) ?? 0;
-  const entry = resolveStepProofEntry(stepProofs, stepIndex);
-  if (!entry?.proof || !Array.isArray(entry.proof)) {
+  const toolParams = isPlainObject(params.toolParams) ? params.toolParams : undefined;
+  const { matches, paramMatches } = findPlanStepIndices(params.plan, params.toolName, toolParams);
+  if (matches.length === 0) {
+    return null;
+  }
+  const resolvedEntries: Array<{
+    stepIndex: number;
+    proof?: unknown;
+    path?: string;
+    valueDigest?: string;
+  }> = [];
+  for (let idx = 0; idx < stepProofs.length; idx += 1) {
+    const entry = resolveStepProofEntry(stepProofs, idx);
+    if (!entry?.proof || !Array.isArray(entry.proof)) {
+      continue;
+    }
+    const stepIndexFromPath = parseStepIndexFromPath(entry.path);
+    if (stepIndexFromPath === null) {
+      continue;
+    }
+    resolvedEntries.push({ stepIndex: stepIndexFromPath, ...entry });
+  }
+
+  let stepIndex: number | null = null;
+  let entry: { proof?: unknown; path?: string; valueDigest?: string } | null = null;
+  const entriesMatchingTool = resolvedEntries.filter((resolved) =>
+    matches.includes(resolved.stepIndex),
+  );
+  if (entriesMatchingTool.length === 1) {
+    stepIndex = entriesMatchingTool[0].stepIndex;
+    entry = entriesMatchingTool[0];
+  } else if (paramMatches.length === 1) {
+    stepIndex = paramMatches[0];
+    entry = resolveStepProofEntry(stepProofs, stepIndex);
+  } else if (matches.length === 1) {
+    stepIndex = matches[0];
+    entry = resolveStepProofEntry(stepProofs, stepIndex);
+  }
+
+  if (stepIndex === null || !entry?.proof || !Array.isArray(entry.proof)) {
     return null;
   }
   const path = entry.path ?? `/steps/[${stepIndex}]/action`;
@@ -429,7 +943,7 @@ function checkIntentTokenPlan(params: {
   intentTokenRaw: string;
   toolName: string;
   toolParams: unknown;
-}): { matched: boolean; blockReason?: string; params?: unknown; plan?: Record<string, unknown> } {
+}): { matched: boolean; blockReason?: string; params?: Record<string, unknown>; plan?: Record<string, unknown> } {
   const parsed = extractPlanFromIntentToken(params.intentTokenRaw);
   if (!parsed) {
     return { matched: false };
@@ -448,8 +962,8 @@ function checkIntentTokenPlan(params: {
   }
   const step = findPlanStep(parsed.plan, params.toolName);
   if (step) {
-    const toolParams = isPlainObject(params.toolParams) ? params.toolParams : {};
-    if (!isParamsAllowedByPlan(step, toolParams)) {
+    const toolParams = isPlainObject(params.toolParams) ? (params.toolParams as Record<string, unknown>) : undefined;
+    if (toolParams && !isParamsAllowedByPlan(step, toolParams)) {
       return {
         matched: true,
         blockReason: `ArmorIQ intent mismatch: parameters not allowed for ${params.toolName}`,
@@ -457,7 +971,7 @@ function checkIntentTokenPlan(params: {
       };
     }
   }
-  return { matched: true, params: params.toolParams, plan: parsed.plan };
+  return { matched: true, params: isPlainObject(params.toolParams) ? (params.toolParams as Record<string, unknown>) : undefined, plan: parsed.plan };
 }
 
 function buildToolList(tools?: Array<{ name: string; description?: string }>): string {
@@ -567,13 +1081,14 @@ async function buildPlanFromPrompt(params: {
     },
   );
 
+  const content = response.content as string | { type?: string; text?: string }[] | undefined;
   const text =
-    typeof response.content === "string"
-      ? response.content.trim()
-      : Array.isArray(response.content)
-        ? response.content
-            .filter((block) => block && (block as { type?: string }).type === "text")
-            .map((block) => (block as { text?: string }).text ?? "")
+    typeof content === "string"
+      ? content.trim()
+      : Array.isArray(content)
+        ? content
+            .filter((block) => block && block.type === "text")
+            .map((block) => block.text ?? "")
             .join(" ")
             .trim()
         : "";
@@ -583,14 +1098,14 @@ async function buildPlanFromPrompt(params: {
   }
 
   try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const parsed = JSON.parse(text) as { steps?: unknown[]; metadata?: Record<string, unknown> };
     if (!parsed.steps || !Array.isArray(parsed.steps)) {
       parsed.steps = [];
     }
     if (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata)) {
       parsed.metadata = { goal: params.prompt };
     }
-    for (const step of parsed.steps) {
+    for (const step of parsed.steps as Record<string, unknown>[]) {
       if (!step || typeof step !== "object") {
         continue;
       }
@@ -740,6 +1255,215 @@ export default function register(api: OpenClawPluginApi) {
     return;
   }
 
+  const policyStore = new PolicyStore({
+    filePath: resolvePolicyStorePath(api, cfg),
+    basePolicy: normalizePolicyDefinition(cfg.policy),
+    logger: api.logger,
+  });
+  const policyReady = policyStore.load();
+
+  if (cfg.policyUpdateEnabled) {
+    api.registerTool(
+      (toolCtx) => ({
+        name: "policy_update",
+        label: "Policy Update",
+        description:
+          "Manage ArmorIQ policy rules (update/list/delete/reset). Use only for explicit policy changes from authorized users.",
+        parameters: PolicyUpdateToolSchema,
+        async execute(_toolCallId, params) {
+          await policyReady;
+          const rawUpdate = (params as { update?: unknown }).update;
+          const rawText = readString((params as { text?: unknown }).text);
+          const actor = toolCtx.agentId ?? toolCtx.sessionKey ?? "unknown";
+
+          if (rawText) {
+            const command = parsePolicyTextCommand(rawText, policyStore.getState());
+            if (command.kind === "list") {
+              const state = policyStore.getState();
+              return {
+                content: [{ type: "text", text: formatPolicyList(state) }],
+                details: { action: "list", version: state.version },
+              };
+            }
+            if (command.kind === "help") {
+              return {
+                content: [{ type: "text", text: formatPolicyHelp() }],
+                details: { action: "help" },
+              };
+            }
+            if (command.kind === "need_id") {
+              return {
+                content: [{ type: "text", text: formatPolicyNeedId() }],
+                details: { action: "need_id" },
+              };
+            }
+            if (command.kind === "get") {
+              const rule = policyStore.getState().policy.rules.find(
+                (entry) => entry.id === command.id,
+              );
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: rule
+                      ? `Policy rule:\n- ${formatPolicyRule(rule)}`
+                      : `Policy rule not found: ${command.id}`,
+                  },
+                ],
+                details: { action: "get", id: command.id, found: Boolean(rule) },
+              };
+            }
+            if (command.kind === "delete") {
+              const beforeCount = policyStore.getState().policy.rules.length;
+              const nextState = await policyStore.removeRules(command.ids, actor, command.reason);
+              const afterCount = nextState.policy.rules.length;
+              const removed = beforeCount - afterCount;
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      removed > 0
+                        ? `Policy updated: removed ${removed} rule(s): ${command.ids.join(", ")}.`
+                        : `No matching rules removed. Known rules:\n${formatPolicyList(
+                            policyStore.getState(),
+                          )}`,
+                  },
+                ],
+                details: {
+                  version: nextState.version,
+                  updatedAt: nextState.updatedAt,
+                  policyHash: policyStore.getPolicyHash(),
+                },
+              };
+            }
+            if (command.kind === "reset") {
+              const resetUpdate: PolicyUpdate = {
+                reason: command.reason,
+                mode: "replace",
+                rules: [
+                  {
+                    id: "allow-all",
+                    action: "allow",
+                    tool: "*",
+                  },
+                ],
+              };
+              const parsedReset = PolicyUpdateSchema.safeParse(resetUpdate);
+              if (!parsedReset.success) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Policy reset rejected: ${parsedReset.error.message}`,
+                    },
+                  ],
+                  details: { error: parsedReset.error.flatten() },
+                };
+              }
+              const nextState = await policyStore.applyUpdate(parsedReset.data, actor);
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Policy reset to version ${nextState.version}.`,
+                  },
+                ],
+                details: {
+                  version: nextState.version,
+                  updatedAt: nextState.updatedAt,
+                  policyHash: policyStore.getPolicyHash(),
+                },
+              };
+            }
+            if (command.kind === "update") {
+              const parsed = PolicyUpdateSchema.safeParse(command.update);
+              if (!parsed.success) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Policy update rejected: ${parsed.error.message}`,
+                    },
+                  ],
+                  details: { error: parsed.error.flatten() },
+                };
+              }
+              const nextState = await policyStore.applyUpdate(parsed.data, actor);
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Policy updated to version ${nextState.version}.`,
+                  },
+                ],
+                details: {
+                  version: nextState.version,
+                  updatedAt: nextState.updatedAt,
+                  policyHash: policyStore.getPolicyHash(),
+                },
+              };
+            }
+          }
+
+          if (!rawUpdate) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Policy update rejected: missing update or text payload.",
+                },
+              ],
+              details: { action: "error", reason: "missing_update" },
+            };
+          }
+
+          const parsed = PolicyUpdateSchema.safeParse(rawUpdate);
+          if (!parsed.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Policy update rejected: ${parsed.error.message}`,
+                },
+              ],
+              details: { error: parsed.error.flatten() },
+            };
+          }
+          try {
+            const nextState = await policyStore.applyUpdate(parsed.data, actor);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Policy updated to version ${nextState.version}.`,
+                },
+              ],
+              details: {
+                version: nextState.version,
+                updatedAt: nextState.updatedAt,
+                policyHash: policyStore.getPolicyHash(),
+              },
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Policy update failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                },
+              ],
+              details: { error: err instanceof Error ? err.stack : String(err) },
+            };
+          }
+        },
+      }),
+      { name: "policy_update" },
+    );
+  }
+
   const verificationService = new IAPVerificationService({
     iapBaseUrl: cfg.backendEndpoint ?? cfg.iapEndpoint,
     timeoutMs: cfg.timeoutMs,
@@ -749,10 +1473,10 @@ export default function register(api: OpenClawPluginApi) {
   api.on("before_agent_start", async (event, ctx) => {
     const runKey = resolveRunKey(ctx as ToolContext);
     if (!runKey) {
-      return;
+      return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
     if (planCache.has(runKey)) {
-      return;
+      return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
 
     const identity = resolveIdentities(cfg, ctx as ToolContext);
@@ -764,10 +1488,11 @@ export default function register(api: OpenClawPluginApi) {
         createdAt: Date.now(),
         error: "ArmorIQ identity missing (userId/agentId)",
       });
-      return;
+      return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
 
     try {
+      await policyReady;
       const plan = await buildPlanFromPrompt({
         prompt: event.prompt,
         tools: event.tools,
@@ -775,6 +1500,12 @@ export default function register(api: OpenClawPluginApi) {
         modelRegistry: ctx.modelRegistry ?? null,
         log: (message) => api.logger.info(message),
       });
+      const planRecord = plan as Record<string, unknown>;
+      const metadata = readRecord(planRecord.metadata);
+      const normalizedMetadata = metadata ?? {};
+      normalizedMetadata.policy_hash = policyStore.getPolicyHash();
+      normalizedMetadata.policy_version = policyStore.getState().version;
+      planRecord.metadata = normalizedMetadata;
 
       const client = getClient(cfg, identity);
       const planCapture = client.capturePlan("openclaw", event.prompt, plan, {
@@ -805,6 +1536,7 @@ export default function register(api: OpenClawPluginApi) {
               ? token.expiresAt
               : undefined,
       });
+      return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       planCache.set(runKey, {
@@ -814,6 +1546,7 @@ export default function register(api: OpenClawPluginApi) {
         createdAt: Date.now(),
         error: `ArmorIQ planning failed: ${message}`,
       });
+      return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
   });
 
@@ -828,7 +1561,62 @@ export default function register(api: OpenClawPluginApi) {
     const normalizedTool = normalizeToolName(event.toolName);
     const toolCtx = ctx as ToolContext;
     const intentTokenRaw = readString(toolCtx.intentTokenRaw);
-    const verifyWithCsrg = async (
+    const policyCheck = async (): Promise<{ block: true; blockReason: string } | null> => {
+      if (normalizedTool === "policy_update") {
+        return null;
+      }
+      await policyReady;
+      const policy = policyStore.getPolicy();
+      if (!policy.rules.length) {
+        return null;
+      }
+      const rawParams = isPlainObject(event.params) ? (event.params as Record<string, unknown>) : {};
+      const sanitized = sanitizeParams(rawParams, cfg);
+      const decision = evaluatePolicy({
+        policy,
+        toolName: event.toolName,
+        toolParams: sanitized,
+      });
+      if (!decision.allowed) {
+        api.logger.warn(
+          `armoriq: policy block tool=${event.toolName} rule=${
+            decision.matchedRule?.id ?? "unknown"
+          } action=${decision.matchedRule?.action ?? "unknown"} dataClasses=${JSON.stringify(
+            decision.dataClasses,
+          )} runId=${String(toolCtx.runId ?? "")} sessionKey=${String(
+            toolCtx.sessionKey ?? "",
+          )} senderId=${String(toolCtx.senderId ?? "")} senderUsername=${String(
+            toolCtx.senderUsername ?? "",
+          )}`,
+        );
+        return {
+          block: true,
+          blockReason: decision.reason ?? "ArmorIQ policy denied",
+        };
+      }
+      return null;
+    };
+
+    if (normalizedTool === "policy_update") {
+      const allowed = isPolicyUpdateAllowed(cfg, toolCtx);
+      if (!allowed.allowed) {
+        api.logger.warn(
+          `armoriq: policy_update denied (allowList=${JSON.stringify(
+            cfg.policyUpdateAllowList ?? [],
+          )}, candidates=${JSON.stringify(allowed.candidates ?? [])}, senderId=${String(
+            toolCtx.senderId ?? "",
+          )}, senderUsername=${String(toolCtx.senderUsername ?? "")}, sessionKey=${String(
+            toolCtx.sessionKey ?? "",
+          )})`,
+        );
+        return {
+          block: true,
+          blockReason: allowed.reason ?? "ArmorIQ policy update denied",
+        };
+      }
+      return event.params ? { params: event.params as Record<string, unknown> } : undefined;
+    }
+    const verifyWithIap = async (
       tokenRaw: string,
       plan: Record<string, unknown>,
     ): Promise<{ block: true; blockReason: string } | null> => {
@@ -838,40 +1626,65 @@ export default function register(api: OpenClawPluginApi) {
       }
       let proofs = proofParse.proofs;
       if (!proofs) {
-        proofs = resolveCsrgProofsFromToken({
+        const resolvedProofs = resolveCsrgProofsFromToken({
           intentTokenRaw: tokenRaw,
           plan,
           toolName: event.toolName,
           toolParams: event.params,
         });
+        proofs = resolvedProofs ?? undefined;
       }
-      const proofError = validateCsrgProofHeaders(
-        proofs,
-        verificationService.csrgProofsRequired(),
+      const proofCount = proofs?.proof && Array.isArray(proofs.proof) ? proofs.proof.length : 0;
+      api.logger.info(
+        `armoriq: verify-step request tool=${event.toolName} runId=${String(
+          toolCtx.runId ?? "",
+        )} proofs=${proofs ? "present" : "none"} proofCount=${proofCount} path=${String(
+          proofs?.path ?? "",
+        )}`,
       );
+      const proofsRequired =
+        verificationService.csrgProofsRequired() && verificationService.csrgVerifyIsEnabled();
+      const proofError = validateCsrgProofHeaders(proofs, proofsRequired);
       if (proofError) {
         return { block: true, blockReason: proofError };
       }
-      if (proofs && verificationService.csrgVerifyIsEnabled()) {
-        try {
-          const verifyResult = await verificationService.verifyStep(
-            tokenRaw,
-            proofs,
-            event.toolName,
-          );
-          if (!verifyResult.allowed) {
-            return {
-              block: true,
-              blockReason: verifyResult.reason || "ArmorIQ intent verification denied",
-            };
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+
+      let verifyToken = tokenRaw;
+      try {
+        const parsed = JSON.parse(tokenRaw);
+        if (parsed?.jwtToken) {
+          verifyToken = parsed.jwtToken;
+          api.logger.info(`armoriq: using jwtToken for verification (length=${verifyToken.length})`);
+        } else {
+          api.logger.warn(`armoriq: no jwtToken in token, using raw (keys=${Object.keys(parsed).join(',')})`);
+        }
+      } catch {
+        api.logger.warn(`armoriq: failed to parse tokenRaw, using as-is`);
+      }
+
+      try {
+        const verifyResult = await verificationService.verifyStep(
+          verifyToken,
+          proofs,
+          event.toolName,
+        );
+        api.logger.info(
+          `armoriq: verify-step result tool=${event.toolName} allowed=${
+            verifyResult.allowed
+          } reason=${verifyResult.reason || "n/a"}`,
+        );
+        if (!verifyResult.allowed) {
           return {
             block: true,
-            blockReason: `ArmorIQ intent verification failed: ${message}`,
+            blockReason: verifyResult.reason || "ArmorIQ intent verification denied",
           };
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          block: true,
+          blockReason: `ArmorIQ intent verification failed: ${message}`,
+        };
       }
       return null;
     };
@@ -883,14 +1696,24 @@ export default function register(api: OpenClawPluginApi) {
         toolParams: event.params,
       });
       if (tokenCheck.matched) {
+        api.logger.info(
+          `armoriq: plan check (context token) tool=${event.toolName} steps=${
+            Array.isArray(tokenCheck.plan?.steps) ? tokenCheck.plan?.steps.length : 0
+          } status=${tokenCheck.blockReason ? "blocked" : "ok"}`,
+        );
         if (tokenCheck.blockReason) {
           return { block: true, blockReason: tokenCheck.blockReason };
         }
-        const csrgResult = await verifyWithCsrg(intentTokenRaw, tokenCheck.plan ?? {});
+        const policyResult = await policyCheck();
+        if (policyResult) {
+          return policyResult;
+        }
+        const csrgResult = await verifyWithIap(intentTokenRaw, tokenCheck.plan ?? {});
         if (csrgResult) {
           return csrgResult;
         }
-        return { params: tokenCheck.params ?? event.params };
+        const resultParams = tokenCheck.params ?? event.params;
+        return resultParams ? { params: resultParams as Record<string, unknown> } : undefined;
       }
 
       const proofParse = parseCsrgProofHeaders(toolCtx);
@@ -904,12 +1727,16 @@ export default function register(api: OpenClawPluginApi) {
       if (proofError) {
         return { block: true, blockReason: proofError };
       }
+      const policyResult = await policyCheck();
+      if (policyResult) {
+        return policyResult;
+      }
 
-      const csrgResult = await verifyWithCsrg(intentTokenRaw, { steps: [] });
+      const csrgResult = await verifyWithIap(intentTokenRaw, { steps: [] });
       if (csrgResult) {
         return csrgResult;
       }
-      return { params: event.params };
+      return event.params ? { params: event.params } : undefined;
     }
 
     if (!cfg.apiKey) {
@@ -932,64 +1759,7 @@ export default function register(api: OpenClawPluginApi) {
       };
     }
 
-    let cached = planCache.get(runKey);
-    if (!cached && toolCtx.runId?.startsWith("http-")) {
-      const client = getClient(cfg, identity);
-      const sanitizedParams = sanitizeParams(event.params ?? {}, cfg);
-      const plan = {
-        steps: [
-          {
-            action: event.toolName,
-            mcp: "openclaw",
-            description: `Authorize tool ${event.toolName}`,
-            metadata: { inputs: sanitizedParams },
-          },
-        ],
-        metadata: { goal: `Authorize tool ${event.toolName}` },
-      };
-      try {
-        const planCapture = client.capturePlan(
-          "openclaw",
-          `Authorize tool ${event.toolName}`,
-          plan,
-          {
-            sessionKey: toolCtx.sessionKey,
-            messageChannel: toolCtx.messageChannel,
-            accountId: toolCtx.accountId,
-            senderId: toolCtx.senderId,
-            senderName: toolCtx.senderName,
-            senderUsername: toolCtx.senderUsername,
-            senderE164: toolCtx.senderE164,
-            runId: toolCtx.runId,
-          },
-        );
-        const token = await client.getIntentToken(planCapture, cfg.policy, cfg.validitySeconds);
-        const tokenRaw = JSON.stringify(token);
-        const tokenParsed = extractPlanFromIntentToken(tokenRaw);
-        const tokenPlan = tokenParsed?.plan ?? plan;
-        cached = {
-          token,
-          tokenRaw,
-          tokenPlan,
-          plan: tokenPlan,
-          allowedActions: extractAllowedActions(tokenPlan),
-          createdAt: Date.now(),
-          expiresAt:
-            typeof tokenParsed?.expiresAt === "number"
-              ? tokenParsed.expiresAt
-              : typeof token.expiresAt === "number"
-                ? token.expiresAt
-                : undefined,
-        };
-        planCache.set(runKey, cached);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          block: true,
-          blockReason: `ArmorIQ authorization failed: ${message}`,
-        };
-      }
-    }
+    const cached = planCache.get(runKey);
 
     if (!cached) {
       return {
@@ -1012,19 +1782,24 @@ export default function register(api: OpenClawPluginApi) {
         toolParams: event.params,
       });
       if (tokenCheck.matched) {
+        api.logger.info(
+          `armoriq: plan check (cached token) tool=${event.toolName} steps=${
+            Array.isArray(tokenCheck.plan?.steps) ? tokenCheck.plan?.steps.length : 0
+          } status=${tokenCheck.blockReason ? "blocked" : "ok"}`,
+        );
         if (tokenCheck.blockReason) {
           return { block: true, blockReason: tokenCheck.blockReason };
         }
-        const csrgResult = await verifyWithCsrg(cached.tokenRaw, tokenCheck.plan ?? {});
+        const policyResult = await policyCheck();
+        if (policyResult) {
+          return policyResult;
+        }
+        const csrgResult = await verifyWithIap(cached.tokenRaw, tokenCheck.plan ?? {});
         if (csrgResult) {
           return csrgResult;
         }
         return { params: tokenCheck.params ?? event.params };
       }
-      return {
-        block: true,
-        blockReason: "ArmorIQ intent token missing plan",
-      };
     }
 
     if (cached.expiresAt && Date.now() / 1000 > cached.expiresAt) {
@@ -1052,6 +1827,10 @@ export default function register(api: OpenClawPluginApi) {
       }
     }
 
+    const policyResult = await policyCheck();
+    if (policyResult) {
+      return policyResult;
+    }
     return { params: event.params };
   });
 }

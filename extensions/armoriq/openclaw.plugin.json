@@ -24,6 +24,12 @@
         "enum": ["sessionKey", "agentId", "channel", "accountId"]
       },
       "policy": { "type": "object" },
+      "policyStorePath": { "type": "string" },
+      "policyUpdateEnabled": { "type": "boolean" },
+      "policyUpdateAllowList": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
       "validitySeconds": { "type": "number" },
       "useProduction": { "type": "boolean" },
       "iapEndpoint": { "type": "string" },

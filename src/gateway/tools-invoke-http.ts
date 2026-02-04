@@ -40,12 +40,20 @@ type ToolsInvokeBody = {
   action?: unknown;
   args?: unknown;
   sessionKey?: unknown;
+  runId?: unknown;
   dryRun?: unknown;
 };
 
 function resolveSessionKeyFromBody(body: ToolsInvokeBody): string | undefined {
   if (typeof body.sessionKey === "string" && body.sessionKey.trim()) {
     return body.sessionKey.trim();
+  }
+  return undefined;
+}
+
+function resolveRunIdFromBody(body: ToolsInvokeBody): string | undefined {
+  if (typeof body.runId === "string" && body.runId.trim()) {
+    return body.runId.trim();
   }
   return undefined;
 }
@@ -174,7 +182,9 @@ export async function handleToolsInvokeHttpRequest(
     getHeader(req, "x-openclaw-message-channel") ?? "",
   );
   const accountId = getHeader(req, "x-openclaw-account-id")?.trim() || undefined;
-  const runId = getHeader(req, "x-openclaw-run-id")?.trim() || `http-${Date.now()}`;
+  const headerRunId = getHeader(req, "x-openclaw-run-id")?.trim();
+  const bodyRunId = resolveRunIdFromBody(body);
+  const runId = headerRunId || bodyRunId || `http-${sessionKey}`;
   const senderId = getHeader(req, "x-openclaw-sender-id")?.trim() || undefined;
   const senderName = getHeader(req, "x-openclaw-sender-name")?.trim() || undefined;
   const senderUsername = getHeader(req, "x-openclaw-sender-username")?.trim() || undefined;
