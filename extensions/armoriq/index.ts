@@ -1165,6 +1165,17 @@ export default function register(api: OpenClawPluginApi) {
         toolParams: sanitized,
       });
       if (!decision.allowed) {
+        api.logger.warn(
+          `armoriq: policy block tool=${event.toolName} rule=${
+            decision.matchedRule?.id ?? "unknown"
+          } action=${decision.matchedRule?.action ?? "unknown"} dataClasses=${JSON.stringify(
+            decision.dataClasses,
+          )} runId=${String(toolCtx.runId ?? "")} sessionKey=${String(
+            toolCtx.sessionKey ?? "",
+          )} senderId=${String(toolCtx.senderId ?? "")} senderUsername=${String(
+            toolCtx.senderUsername ?? "",
+          )}`,
+        );
         return {
           block: true,
           blockReason: decision.reason ?? "ArmorIQ policy denied",
@@ -1210,6 +1221,14 @@ export default function register(api: OpenClawPluginApi) {
         });
         proofs = resolvedProofs ?? undefined;
       }
+      const proofCount = proofs?.proof && Array.isArray(proofs.proof) ? proofs.proof.length : 0;
+      api.logger.info(
+        `armoriq: verify-step request tool=${event.toolName} runId=${String(
+          toolCtx.runId ?? "",
+        )} proofs=${proofs ? "present" : "none"} proofCount=${proofCount} path=${String(
+          proofs?.path ?? "",
+        )}`,
+      );
       const proofsRequired =
         verificationService.csrgProofsRequired() && verificationService.csrgVerifyIsEnabled();
       const proofError = validateCsrgProofHeaders(proofs, proofsRequired);
@@ -1222,6 +1241,11 @@ export default function register(api: OpenClawPluginApi) {
           tokenRaw,
           proofs,
           event.toolName,
+        );
+        api.logger.info(
+          `armoriq: verify-step result tool=${event.toolName} allowed=${
+            verifyResult.allowed
+          } reason=${verifyResult.reason || "n/a"}`,
         );
         if (!verifyResult.allowed) {
           return {
@@ -1246,6 +1270,11 @@ export default function register(api: OpenClawPluginApi) {
         toolParams: event.params,
       });
       if (tokenCheck.matched) {
+        api.logger.info(
+          `armoriq: plan check (context token) tool=${event.toolName} steps=${
+            Array.isArray(tokenCheck.plan?.steps) ? tokenCheck.plan?.steps.length : 0
+          } status=${tokenCheck.blockReason ? "blocked" : "ok"}`,
+        );
         if (tokenCheck.blockReason) {
           return { block: true, blockReason: tokenCheck.blockReason };
         }
@@ -1327,6 +1356,11 @@ export default function register(api: OpenClawPluginApi) {
         toolParams: event.params,
       });
       if (tokenCheck.matched) {
+        api.logger.info(
+          `armoriq: plan check (cached token) tool=${event.toolName} steps=${
+            Array.isArray(tokenCheck.plan?.steps) ? tokenCheck.plan?.steps.length : 0
+          } status=${tokenCheck.blockReason ? "blocked" : "ok"}`,
+        );
         if (tokenCheck.blockReason) {
           return { block: true, blockReason: tokenCheck.blockReason };
         }
