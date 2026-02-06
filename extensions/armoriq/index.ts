@@ -1274,6 +1274,8 @@ function sanitizeParams(
 
 export default function register(api: OpenClawPluginApi) {
   const cfg = resolveConfig(api);
+  api.logger.info(`[aiq-trace] register() called | enabled=${cfg.enabled} policyUpdateEnabled=${cfg.policyUpdateEnabled} cryptoPolicyEnabled=${cfg.cryptoPolicyEnabled} allowList=${JSON.stringify(cfg.policyUpdateAllowList ?? [])} apiKey=${cfg.apiKey ? cfg.apiKey.slice(0, 12) + '...' : 'MISSING'} iap=${cfg.iapEndpoint ?? cfg.backendEndpoint ?? 'none'} proxy=${cfg.proxyEndpoint ?? 'none'} backend=${cfg.backendEndpoint ?? 'none'}`);
+  api.logger.info(`[aiq-trace] raw pluginConfig keys: ${JSON.stringify(Object.keys(api.pluginConfig ?? {}))}`);
 
   if (!cfg.enabled) {
     api.logger.info("armoriq: plugin disabled (set plugins.entries.armoriq.enabled=true)");
@@ -1322,7 +1324,9 @@ export default function register(api: OpenClawPluginApi) {
     }
   });
 
+  api.logger.info(`[aiq-trace] about to register tools | policyUpdateEnabled=${cfg.policyUpdateEnabled}`);
   if (cfg.policyUpdateEnabled) {
+    api.logger.info(`[aiq-trace] registering policy_update tool NOW`);
     api.registerTool(
       (toolCtx) => ({
         name: "policy_update",
@@ -1561,11 +1565,14 @@ export default function register(api: OpenClawPluginApi) {
   });
 
   api.on("before_agent_start", async (event, ctx) => {
+    api.logger.info(`[aiq-trace] before_agent_start FIRED | prompt="${event.prompt?.slice(0, 80)}..." senderId=${(ctx as any).senderId ?? 'none'} senderUsername=${(ctx as any).senderUsername ?? 'none'} sessionKey=${(ctx as any).sessionKey ?? 'none'} toolCount=${event.tools?.length ?? 0} toolNames=${JSON.stringify((event.tools ?? []).map((t: any) => t.name))}`);
     const runKey = resolveRunKey(ctx as ToolContext);
     if (!runKey) {
+      api.logger.info(`[aiq-trace] before_agent_start: no runKey, returning prependContext=${cfg.policyUpdateEnabled}`);
       return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
     if (planCache.has(runKey)) {
+      api.logger.info(`[aiq-trace] before_agent_start: planCache HIT for runKey=${runKey}, returning prependContext=${cfg.policyUpdateEnabled}`);
       return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
 
@@ -1650,6 +1657,7 @@ export default function register(api: OpenClawPluginApi) {
   api.on("before_tool_call", async (event, ctx) => {
     const normalizedTool = normalizeToolName(event.toolName);
     const toolCtx = ctx as ToolContext;
+    api.logger.info(`[aiq-trace] before_tool_call FIRED | tool=${event.toolName} normalized=${normalizedTool} senderId=${toolCtx.senderId ?? 'none'} senderUsername=${toolCtx.senderUsername ?? 'none'}`);
     const intentTokenRaw = readString(toolCtx.intentTokenRaw);
     const policyCheck = async (): Promise<{ block: true; blockReason: string } | null> => {
       if (normalizedTool === "policy_update") {

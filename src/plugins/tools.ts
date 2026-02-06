@@ -62,8 +62,12 @@ export function resolvePluginTools(params: {
   const allowlist = normalizeAllowlist(params.toolAllowlist);
   const blockedPlugins = new Set<string>();
 
+  log.info(
+    `[aiq-trace] resolvePluginTools: registry has ${registry.tools.length} tool entries, allowlist=${JSON.stringify(params.toolAllowlist ?? [])}`,
+  );
   for (const entry of registry.tools) {
     if (blockedPlugins.has(entry.pluginId)) {
+      log.info(`[aiq-trace] resolvePluginTools: skipping blocked plugin=${entry.pluginId}`);
       continue;
     }
     const pluginIdKey = normalizeToolName(entry.pluginId);
@@ -99,7 +103,13 @@ export function resolvePluginTools(params: {
           }),
         )
       : listRaw;
+    log.info(
+      `[aiq-trace] resolvePluginTools: plugin=${entry.pluginId} optional=${entry.optional} rawTools=${listRaw.map((t) => t.name)} afterFilter=${list.map((t) => t.name)}`,
+    );
     if (list.length === 0) {
+      log.info(
+        `[aiq-trace] resolvePluginTools: plugin=${entry.pluginId} produced 0 tools after filter, skipping`,
+      );
       continue;
     }
     const nameSet = new Set<string>();
@@ -125,5 +135,8 @@ export function resolvePluginTools(params: {
     }
   }
 
+  log.info(
+    `[aiq-trace] resolvePluginTools DONE: ${tools.length} plugin tools: [${tools.map((t) => t.name).join(", ")}]`,
+  );
   return tools;
 }

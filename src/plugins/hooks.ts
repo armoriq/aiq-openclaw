@@ -147,10 +147,16 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
 
     for (const hook of hooks) {
       try {
+        logger?.warn?.(
+          `[aiq-trace] hooks: calling ${hookName} handler from plugin=${hook.pluginId}`,
+        );
         const handlerResult = await (
           hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>
         )(event, ctx);
 
+        logger?.warn?.(
+          `[aiq-trace] hooks: ${hookName} handler from plugin=${hook.pluginId} returned: ${handlerResult !== undefined && handlerResult !== null ? JSON.stringify(Object.keys(handlerResult as any)) : "undefined/null"}`,
+        );
         if (handlerResult !== undefined && handlerResult !== null) {
           if (mergeResults && result !== undefined) {
             result = mergeResults(result, handlerResult);

@@ -710,6 +710,9 @@ export async function runEmbeddedAttempt(
 
         // Run before_agent_start hooks to allow plugins to inject context
         let effectivePrompt = params.prompt;
+        log.warn(
+          `[aiq-trace] attempt: prompt="${params.prompt?.slice(0, 100)}" toolCount=${tools.length} toolNames=[${tools.map((t) => t.name).join(", ")}] hasHooks=${hookRunner?.hasHooks("before_agent_start") ?? false} senderId=${params.senderId ?? "none"} senderUsername=${params.senderUsername ?? "none"} sessionKey=${params.sessionKey ?? "none"}`,
+        );
         if (hookRunner?.hasHooks("before_agent_start")) {
           try {
             const hookTools =
@@ -745,14 +748,21 @@ export async function runEmbeddedAttempt(
                 modelRegistry: params.modelRegistry,
               },
             );
+            log.warn(
+              `[aiq-trace] hookResult: prependContext=${hookResult?.prependContext ? hookResult.prependContext.length + " chars" : "NONE"} systemPrompt=${hookResult?.systemPrompt ? "yes" : "no"}`,
+            );
             if (hookResult?.prependContext) {
               effectivePrompt = `${hookResult.prependContext}\n\n${params.prompt}`;
-              log.debug(
-                `hooks: prepended context to prompt (${hookResult.prependContext.length} chars)`,
+              log.warn(
+                `[aiq-trace] prepended ${hookResult.prependContext.length} chars to prompt, effectivePrompt starts with: "${effectivePrompt.slice(0, 120)}..."`,
+              );
+            } else {
+              log.warn(
+                `[aiq-trace] NO prependContext from hooks, prompt unchanged: "${effectivePrompt.slice(0, 100)}..."`,
               );
             }
           } catch (hookErr) {
-            log.warn(`before_agent_start hook failed: ${String(hookErr)}`);
+            log.warn(`[aiq-trace] before_agent_start hook FAILED: ${String(hookErr)}`);
           }
         }
 

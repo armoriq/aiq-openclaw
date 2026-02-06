@@ -191,6 +191,9 @@ export function createOpenClawCodingTools(options?: {
     senderUsername: options?.senderUsername,
     senderE164: options?.senderE164,
   });
+  logWarn(
+    `[aiq-trace] createOpenClawCodingTools policies: agentId=${agentId ?? "none"} profile=${profile ?? "none"} providerProfile=${providerProfile ?? "none"} globalPolicy=${JSON.stringify(globalPolicy ?? null)} agentPolicy=${JSON.stringify(agentPolicy ?? null)} globalProviderPolicy=${JSON.stringify(globalProviderPolicy ?? null)} agentProviderPolicy=${JSON.stringify(agentProviderPolicy ?? null)} groupPolicy=${JSON.stringify(groupPolicy ?? null)}`,
+  );
   const profilePolicy = resolveToolProfilePolicy(profile);
   const providerProfilePolicy = resolveToolProfilePolicy(providerProfile);
 
@@ -396,33 +399,69 @@ export function createOpenClawCodingTools(options?: {
   const sandboxPolicyExpanded = expandPolicyWithPluginGroups(sandbox?.tools, pluginGroups);
   const subagentPolicyExpanded = expandPolicyWithPluginGroups(subagentPolicy, pluginGroups);
 
+  logWarn(
+    `[aiq-trace] tool filter START: ${tools.length} tools: [${tools.map((t) => t.name).join(", ")}]`,
+  );
   const toolsFiltered = profilePolicyExpanded
     ? filterToolsByPolicy(tools, profilePolicyExpanded)
     : tools;
+  if (profilePolicyExpanded)
+    logWarn(
+      `[aiq-trace] after profile filter: ${toolsFiltered.length} (was ${tools.length}) policy=${JSON.stringify(profilePolicyExpanded)}`,
+    );
   const providerProfileFiltered = providerProfileExpanded
     ? filterToolsByPolicy(toolsFiltered, providerProfileExpanded)
     : toolsFiltered;
+  if (providerProfileExpanded)
+    logWarn(
+      `[aiq-trace] after providerProfile filter: ${providerProfileFiltered.length} (was ${toolsFiltered.length})`,
+    );
   const globalFiltered = globalPolicyExpanded
     ? filterToolsByPolicy(providerProfileFiltered, globalPolicyExpanded)
     : providerProfileFiltered;
+  if (globalPolicyExpanded)
+    logWarn(
+      `[aiq-trace] after global filter: ${globalFiltered.length} (was ${providerProfileFiltered.length}) policy=${JSON.stringify(globalPolicyExpanded)}`,
+    );
   const globalProviderFiltered = globalProviderExpanded
     ? filterToolsByPolicy(globalFiltered, globalProviderExpanded)
     : globalFiltered;
+  if (globalProviderExpanded)
+    logWarn(
+      `[aiq-trace] after globalProvider filter: ${globalProviderFiltered.length} (was ${globalFiltered.length})`,
+    );
   const agentFiltered = agentPolicyExpanded
     ? filterToolsByPolicy(globalProviderFiltered, agentPolicyExpanded)
     : globalProviderFiltered;
+  if (agentPolicyExpanded)
+    logWarn(
+      `[aiq-trace] after agent filter: ${agentFiltered.length} (was ${globalProviderFiltered.length})`,
+    );
   const agentProviderFiltered = agentProviderExpanded
     ? filterToolsByPolicy(agentFiltered, agentProviderExpanded)
     : agentFiltered;
+  if (agentProviderExpanded)
+    logWarn(
+      `[aiq-trace] after agentProvider filter: ${agentProviderFiltered.length} (was ${agentFiltered.length})`,
+    );
   const groupFiltered = groupPolicyExpanded
     ? filterToolsByPolicy(agentProviderFiltered, groupPolicyExpanded)
     : agentProviderFiltered;
+  if (groupPolicyExpanded)
+    logWarn(
+      `[aiq-trace] after group filter: ${groupFiltered.length} (was ${agentProviderFiltered.length}) policy=${JSON.stringify(groupPolicyExpanded)}`,
+    );
   const sandboxed = sandboxPolicyExpanded
     ? filterToolsByPolicy(groupFiltered, sandboxPolicyExpanded)
     : groupFiltered;
+  if (sandboxPolicyExpanded)
+    logWarn(`[aiq-trace] after sandbox filter: ${sandboxed.length} (was ${groupFiltered.length})`);
   const subagentFiltered = subagentPolicyExpanded
     ? filterToolsByPolicy(sandboxed, subagentPolicyExpanded)
     : sandboxed;
+  logWarn(
+    `[aiq-trace] tool filter DONE: ${subagentFiltered.length} tools: [${subagentFiltered.map((t) => t.name).join(", ")}]`,
+  );
   // Always normalize tool JSON Schemas before handing them to pi-agent/pi-ai.
   // Without this, some providers (notably OpenAI) will reject root-level union schemas.
   const normalized = subagentFiltered.map(normalizeToolParameters);
