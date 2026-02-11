@@ -2,10 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RuntimeEnv } from "../runtime.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
-import {
-  resolveControlUiDistIndexHealth,
-  resolveControlUiDistIndexPathForRoot,
-} from "../infra/control-ui-assets.js";
 import { resolveOpenClawPackageRoot } from "../infra/openclaw-root.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { note } from "../terminal/note.js";
@@ -25,11 +21,7 @@ export async function maybeRepairUiProtocolFreshness(
   }
 
   const schemaPath = path.join(root, "src/gateway/protocol/schema.ts");
-  const uiHealth = await resolveControlUiDistIndexHealth({
-    root,
-    argv1: process.argv[1],
-  });
-  const uiIndexPath = uiHealth.indexPath ?? resolveControlUiDistIndexPathForRoot(root);
+  const uiIndexPath = path.join(root, "dist/control-ui/index.html");
 
   try {
     const [schemaStats, uiStats] = await Promise.all([

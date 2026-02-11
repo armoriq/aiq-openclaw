@@ -132,7 +132,6 @@ export class GatewayClient {
           return new Error("gateway tls fingerprint mismatch");
         }
         return undefined;
-        // oxlint-disable-next-line typescript/no-explicit-any
       }) as any;
     }
     this.ws = new WebSocket(url, wsOptions);

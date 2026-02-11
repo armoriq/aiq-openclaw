@@ -771,13 +771,7 @@ export function registerHooksCli(program: Command): void {
           continue;
         }
 
-        let installPath: string;
-        try {
-          installPath = record.installPath ?? resolveHookInstallDir(hookId);
-        } catch (err) {
-          defaultRuntime.log(theme.error(`Invalid install path for "${hookId}": ${String(err)}`));
-          continue;
-        }
+        const installPath = record.installPath ?? resolveHookInstallDir(hookId);
         const currentVersion = await readInstalledPackageVersion(installPath);
 
         if (opts.dryRun) {

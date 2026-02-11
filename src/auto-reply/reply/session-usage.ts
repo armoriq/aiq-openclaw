@@ -1,9 +1,5 @@
 import { setCliSessionId } from "../../agents/cli-session.js";
-import {
-  deriveSessionTotalTokens,
-  hasNonzeroUsage,
-  type NormalizedUsage,
-} from "../../agents/usage.js";
+import { hasNonzeroUsage, type NormalizedUsage } from "../../agents/usage.js";
 import {
   type SessionSystemPromptReport,
   type SessionEntry,
@@ -36,18 +32,15 @@ export async function persistSessionUsageUpdate(params: {
         update: async (entry) => {
           const input = params.usage?.input ?? 0;
           const output = params.usage?.output ?? 0;
-          const resolvedContextTokens = params.contextTokensUsed ?? entry.contextTokens;
+          const promptTokens =
+            input + (params.usage?.cacheRead ?? 0) + (params.usage?.cacheWrite ?? 0);
           const patch: Partial<SessionEntry> = {
             inputTokens: input,
             outputTokens: output,
-            totalTokens:
-              deriveSessionTotalTokens({
-                usage: params.usage,
-                contextTokens: resolvedContextTokens,
-              }) ?? input,
+            totalTokens: promptTokens > 0 ? promptTokens : (params.usage?.total ?? input),
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
-            contextTokens: resolvedContextTokens,
+            contextTokens: params.contextTokensUsed ?? entry.contextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
             updatedAt: Date.now(),
           };

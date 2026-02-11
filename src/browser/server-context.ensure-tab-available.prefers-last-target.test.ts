@@ -51,11 +51,12 @@ describe("browser server-context ensureTabAvailable", () => {
       } as unknown as Response;
     });
 
+    // @ts-expect-error test override
     global.fetch = fetchMock;
 
     const state: BrowserServerState = {
       // unused in these tests
-      // oxlint-disable-next-line typescript/no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
       server: null as any,
       port: 0,
       resolved: {
@@ -112,10 +113,11 @@ describe("browser server-context ensureTabAvailable", () => {
       return { ok: true, json: async () => next } as unknown as Response;
     });
 
+    // @ts-expect-error test override
     global.fetch = fetchMock;
 
     const state: BrowserServerState = {
-      // oxlint-disable-next-line typescript/no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
       server: null as any,
       port: 0,
       resolved: {
@@ -162,11 +164,11 @@ describe("browser server-context ensureTabAvailable", () => {
       }
       return { ok: true, json: async () => next } as unknown as Response;
     });
-
+    // @ts-expect-error test override
     global.fetch = fetchMock;
 
     const state: BrowserServerState = {
-      // oxlint-disable-next-line typescript/no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
       server: null as any,
       port: 0,
       resolved: {

@@ -31,7 +31,7 @@ openclaw onboard --anthropic-api-key "$ANTHROPIC_API_KEY"
 ```json5
 {
   env: { ANTHROPIC_API_KEY: "sk-ant-..." },
-  agents: { defaults: { model: { primary: "anthropic/claude-opus-4-6" } } },
+  agents: { defaults: { model: { primary: "anthropic/claude-opus-4-5" } } },
 }
 ```
 
@@ -54,7 +54,7 @@ Use the `cacheRetention` parameter in your model config:
   agents: {
     defaults: {
       models: {
-        "anthropic/claude-opus-4-6": {
+        "anthropic/claude-opus-4-5": {
           params: { cacheRetention: "long" },
         },
       },
@@ -103,18 +103,18 @@ If you generated the token on a different machine, paste it:
 openclaw models auth paste-token --provider anthropic
 ```
 
-### CLI setup (setup-token)
+### CLI setup
 
 ```bash
 # Paste a setup-token during onboarding
 openclaw onboard --auth-choice setup-token
 ```
 
-### Config snippet (setup-token)
+### Config snippet
 
 ```json5
 {
-  agents: { defaults: { model: { primary: "anthropic/claude-opus-4-6" } } },
+  agents: { defaults: { model: { primary: "anthropic/claude-opus-4-5" } } },
 }
 ```
 

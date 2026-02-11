@@ -61,7 +61,6 @@ describe("buildAuthChoiceOptions", () => {
     });
 
     expect(options.some((opt) => opt.value === "moonshot-api-key")).toBe(true);
-    expect(options.some((opt) => opt.value === "moonshot-api-key-cn")).toBe(true);
     expect(options.some((opt) => opt.value === "kimi-code-api-key")).toBe(true);
   });
 
@@ -73,16 +72,6 @@ describe("buildAuthChoiceOptions", () => {
     });
 
     expect(options.some((opt) => opt.value === "ai-gateway-api-key")).toBe(true);
-  });
-
-  it("includes Cloudflare AI Gateway auth choice", () => {
-    const store: AuthProfileStore = { version: 1, profiles: {} };
-    const options = buildAuthChoiceOptions({
-      store,
-      includeSkip: false,
-    });
-
-    expect(options.some((opt) => opt.value === "cloudflare-ai-gateway-api-key")).toBe(true);
   });
 
   it("includes Synthetic auth choice", () => {
@@ -113,15 +102,5 @@ describe("buildAuthChoiceOptions", () => {
     });
 
     expect(options.some((opt) => opt.value === "qwen-portal")).toBe(true);
-  });
-
-  it("includes xAI auth choice", () => {
-    const store: AuthProfileStore = { version: 1, profiles: {} };
-    const options = buildAuthChoiceOptions({
-      store,
-      includeSkip: false,
-    });
-
-    expect(options.some((opt) => opt.value === "xai-api-key")).toBe(true);
   });
 });

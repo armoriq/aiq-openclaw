@@ -31,14 +31,11 @@ export async function dashboardCommand(
     customBindHost,
     basePath,
   });
-  // Prefer URL fragment to avoid leaking auth tokens via query params.
-  const dashboardUrl = token
-    ? `${links.httpUrl}#token=${encodeURIComponent(token)}`
-    : links.httpUrl;
+  const authedUrl = token ? `${links.httpUrl}?token=${encodeURIComponent(token)}` : links.httpUrl;
 
-  runtime.log(`Dashboard URL: ${dashboardUrl}`);
+  runtime.log(`Dashboard URL: ${authedUrl}`);
 
-  const copied = await copyToClipboard(dashboardUrl).catch(() => false);
+  const copied = await copyToClipboard(authedUrl).catch(() => false);
   runtime.log(copied ? "Copied to clipboard." : "Copy to clipboard unavailable.");
 
   let opened = false;
@@ -46,7 +43,7 @@ export async function dashboardCommand(
   if (!options.noOpen) {
     const browserSupport = await detectBrowserOpenSupport();
     if (browserSupport.ok) {
-      opened = await openUrl(dashboardUrl);
+      opened = await openUrl(authedUrl);
     }
     if (!opened) {
       hint = formatControlUiSshHint({

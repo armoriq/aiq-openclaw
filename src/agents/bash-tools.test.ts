@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
-import { sleep } from "../utils.js";
 import { getFinishedSession, resetProcessRegistryForTests } from "./bash-process-registry.js";
 import { createExecTool, createProcessTool, execTool, processTool } from "./bash-tools.js";
 import { buildDockerExecArgs } from "./bash-tools.shared.js";
@@ -45,6 +44,8 @@ const normalizeText = (value?: string) =>
     .map((line) => line.replace(/\s+$/u, ""))
     .join("\n")
     .trim();
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitForCompletion(sessionId: string) {
   let status = "running";
@@ -287,18 +288,16 @@ describe("exec notifyOnExit", () => {
     expect(result.details.status).toBe("running");
     const sessionId = (result.details as { sessionId: string }).sessionId;
 
-    const prefix = sessionId.slice(0, 8);
     let finished = getFinishedSession(sessionId);
-    let hasEvent = peekSystemEvents("agent:main:main").some((event) => event.includes(prefix));
-    const deadline = Date.now() + (isWin ? 12_000 : 5_000);
-    while ((!finished || !hasEvent) && Date.now() < deadline) {
+    const deadline = Date.now() + (isWin ? 8000 : 2000);
+    while (!finished && Date.now() < deadline) {
       await sleep(20);
       finished = getFinishedSession(sessionId);
-      hasEvent = peekSystemEvents("agent:main:main").some((event) => event.includes(prefix));
     }
 
     expect(finished).toBeTruthy();
-    expect(hasEvent).toBe(true);
+    const events = peekSystemEvents("agent:main:main");
+    expect(events.some((event) => event.includes(sessionId.slice(0, 8)))).toBe(true);
   });
 });
 

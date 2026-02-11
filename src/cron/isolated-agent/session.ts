@@ -28,8 +28,6 @@ export function resolveCronSession(params: {
     lastChannel: entry?.lastChannel,
     lastTo: entry?.lastTo,
     lastAccountId: entry?.lastAccountId,
-    label: entry?.label,
-    displayName: entry?.displayName,
     skillsSnapshot: entry?.skillsSnapshot,
   };
   return { storePath, store, sessionEntry, systemSent, isNewSession: true };

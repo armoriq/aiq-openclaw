@@ -23,7 +23,6 @@ export const TlonAccountSchema = z.object({
   dmAllowlist: z.array(ShipSchema).optional(),
   autoDiscoverChannels: z.boolean().optional(),
   showModelSignature: z.boolean().optional(),
-  responsePrefix: z.string().optional(),
 });
 
 export const TlonConfigSchema = z.object({
@@ -36,7 +35,6 @@ export const TlonConfigSchema = z.object({
   dmAllowlist: z.array(ShipSchema).optional(),
   autoDiscoverChannels: z.boolean().optional(),
   showModelSignature: z.boolean().optional(),
-  responsePrefix: z.string().optional(),
   authorization: TlonAuthorizationSchema.optional(),
   defaultAuthorizedShips: z.array(ShipSchema).optional(),
   accounts: z.record(z.string(), TlonAccountSchema).optional(),

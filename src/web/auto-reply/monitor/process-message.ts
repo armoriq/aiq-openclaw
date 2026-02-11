@@ -18,7 +18,7 @@ import {
 import { finalizeInboundContext } from "../../../auto-reply/reply/inbound-context.js";
 import { dispatchReplyWithBufferedBlockDispatcher } from "../../../auto-reply/reply/provider-dispatcher.js";
 import { toLocationContext } from "../../../channels/location.js";
-import { createReplyPrefixOptions } from "../../../channels/reply-prefix.js";
+import { createReplyPrefixContext } from "../../../channels/reply-prefix.js";
 import { resolveMarkdownTableMode } from "../../../config/markdown-tables.js";
 import {
   readSessionUpdatedAt,
@@ -255,18 +255,16 @@ export async function processMessage(params: {
     ? await resolveWhatsAppCommandAuthorized({ cfg: params.cfg, msg: params.msg })
     : undefined;
   const configuredResponsePrefix = params.cfg.messages?.responsePrefix;
-  const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
+  const prefixContext = createReplyPrefixContext({
     cfg: params.cfg,
     agentId: params.route.agentId,
-    channel: "whatsapp",
-    accountId: params.route.accountId,
   });
   const isSelfChat =
     params.msg.chatType !== "group" &&
     Boolean(params.msg.selfE164) &&
     normalizeE164(params.msg.from) === normalizeE164(params.msg.selfE164 ?? "");
   const responsePrefix =
-    prefixOptions.responsePrefix ??
+    prefixContext.responsePrefix ??
     (configuredResponsePrefix === undefined && isSelfChat
       ? (resolveIdentityNamePrefix(params.cfg, params.route.agentId) ?? "[openclaw]")
       : undefined);
@@ -341,8 +339,8 @@ export async function processMessage(params: {
     cfg: params.cfg,
     replyResolver: params.replyResolver,
     dispatcherOptions: {
-      ...prefixOptions,
       responsePrefix,
+      responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
       onHeartbeatStrip: () => {
         if (!didLogHeartbeatStrip) {
           didLogHeartbeatStrip = true;
@@ -402,7 +400,7 @@ export async function processMessage(params: {
         typeof params.cfg.channels?.whatsapp?.blockStreaming === "boolean"
           ? !params.cfg.channels.whatsapp.blockStreaming
           : undefined,
-      onModelSelected,
+      onModelSelected: prefixContext.onModelSelected,
     },
   });
 

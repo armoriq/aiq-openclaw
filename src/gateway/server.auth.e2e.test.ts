@@ -11,7 +11,6 @@ import {
   onceMessage,
   startGatewayServer,
   startServerWithClient,
-  testTailscaleWhois,
   testState,
 } from "./test-helpers.js";
 
@@ -32,20 +31,6 @@ async function waitForWsClose(ws: WebSocket, timeoutMs: number): Promise<boolean
 
 const openWs = async (port: number) => {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-  await new Promise<void>((resolve) => ws.once("open", resolve));
-  return ws;
-};
-
-const openTailscaleWs = async (port: number) => {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
-    headers: {
-      "x-forwarded-for": "100.64.0.1",
-      "x-forwarded-proto": "https",
-      "x-forwarded-host": "gateway.tailnet.ts.net",
-      "tailscale-user-login": "peter",
-      "tailscale-user-name": "Peter",
-    },
-  });
   await new Promise<void>((resolve) => ws.once("open", resolve));
   return ws;
 };
@@ -294,44 +279,6 @@ describe("gateway server auth/connect", () => {
     });
   });
 
-  describe("tailscale auth", () => {
-    let server: Awaited<ReturnType<typeof startGatewayServer>>;
-    let port: number;
-
-    beforeAll(async () => {
-      testState.gatewayAuth = { mode: "token", token: "secret", allowTailscale: true };
-      port = await getFreePort();
-      server = await startGatewayServer(port);
-    });
-
-    afterAll(async () => {
-      await server.close();
-    });
-
-    beforeEach(() => {
-      testTailscaleWhois.value = { login: "peter", name: "Peter" };
-    });
-
-    afterEach(() => {
-      testTailscaleWhois.value = null;
-    });
-
-    test("requires device identity when only tailscale auth is available", async () => {
-      const ws = await openTailscaleWs(port);
-      const res = await connectReq(ws, { token: "dummy", device: null });
-      expect(res.ok).toBe(false);
-      expect(res.error?.message ?? "").toContain("device identity required");
-      ws.close();
-    });
-
-    test("allows shared token to skip device when tailscale auth is enabled", async () => {
-      const ws = await openTailscaleWs(port);
-      const res = await connectReq(ws, { token: "secret", device: null });
-      expect(res.ok).toBe(true);
-      ws.close();
-    });
-  });
-
   test("allows control ui without device identity when insecure auth is enabled", async () => {
     testState.gatewayControlUi = { allowInsecureAuth: true };
     const { server, ws, prevToken } = await startServerWithClient("secret");
@@ -363,7 +310,6 @@ describe("gateway server auth/connect", () => {
       gateway: {
         trustedProxies: ["127.0.0.1"],
       },
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any);
     const prevToken = process.env.OPENCLAW_GATEWAY_TOKEN;
     process.env.OPENCLAW_GATEWAY_TOKEN = "secret";

@@ -1,12 +1,11 @@
 import type {
   ChannelAccountSnapshot,
-  ChatType,
   OpenClawConfig,
   ReplyPayload,
   RuntimeEnv,
 } from "openclaw/plugin-sdk";
 import {
-  createReplyPrefixOptions,
+  createReplyPrefixContext,
   createTypingCallbacks,
   logInboundDrop,
   logTypingFailure,
@@ -132,13 +131,13 @@ function isSystemPost(post: MattermostPost): boolean {
   return Boolean(type);
 }
 
-function channelKind(channelType?: string | null): ChatType {
+function channelKind(channelType?: string | null): "dm" | "group" | "channel" {
   if (!channelType) {
     return "channel";
   }
   const normalized = channelType.trim().toUpperCase();
   if (normalized === "D") {
-    return "direct";
+    return "dm";
   }
   if (normalized === "G") {
     return "group";
@@ -146,8 +145,8 @@ function channelKind(channelType?: string | null): ChatType {
   return "channel";
 }
 
-function channelChatType(kind: ChatType): "direct" | "group" | "channel" {
-  if (kind === "direct") {
+function channelChatType(kind: "dm" | "group" | "channel"): "direct" | "group" | "channel" {
+  if (kind === "dm") {
     return "direct";
   }
   if (kind === "group") {
@@ -470,11 +469,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       hasControlCommand,
     });
     const commandAuthorized =
-      kind === "direct"
+      kind === "dm"
         ? dmPolicy === "open" || senderAllowedForCommands
         : commandGate.commandAuthorized;
 
-    if (kind === "direct") {
+    if (kind === "dm") {
       if (dmPolicy === "disabled") {
         logVerboseMessage(`mattermost: drop dm (dmPolicy=disabled sender=${senderId})`);
         return;
@@ -525,7 +524,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       }
     }
 
-    if (kind !== "direct" && commandGate.shouldBlock) {
+    if (kind !== "dm" && commandGate.shouldBlock) {
       logInboundDrop({
         log: logVerboseMessage,
         channel: "mattermost",
@@ -548,7 +547,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       teamId,
       peer: {
         kind,
-        id: kind === "direct" ? senderId : channelId,
+        id: kind === "dm" ? senderId : channelId,
       },
     });
 
@@ -560,11 +559,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       parentSessionKey: threadRootId ? baseSessionKey : undefined,
     });
     const sessionKey = threadKeys.sessionKey;
-    const historyKey = kind === "direct" ? null : sessionKey;
+    const historyKey = kind === "dm" ? null : sessionKey;
 
     const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId);
     const wasMentioned =
-      kind !== "direct" &&
+      kind !== "dm" &&
       ((botUsername ? rawText.toLowerCase().includes(`@${botUsername.toLowerCase()}`) : false) ||
         core.channel.mentions.matchesMentionPatterns(rawText, mentionRegexes));
     const pendingBody =
@@ -591,7 +590,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       });
     };
 
-    const oncharEnabled = account.chatmode === "onchar" && kind !== "direct";
+    const oncharEnabled = account.chatmode === "onchar" && kind !== "dm";
     const oncharPrefixes = oncharEnabled ? resolveOncharPrefixes(account.oncharPrefixes) : [];
     const oncharResult = oncharEnabled
       ? stripOncharPrefix(rawText, oncharPrefixes)
@@ -599,7 +598,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     const oncharTriggered = oncharResult.triggered;
 
     const shouldRequireMention =
-      kind !== "direct" &&
+      kind !== "dm" &&
       core.channel.groups.resolveRequireMention({
         cfg,
         channel: "mattermost",
@@ -616,7 +615,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return;
     }
 
-    if (kind !== "direct" && shouldRequireMention && canDetectMention) {
+    if (kind !== "dm" && shouldRequireMention && canDetectMention) {
       if (!effectiveWasMentioned) {
         recordPendingHistory();
         return;
@@ -638,7 +637,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     });
 
     const fromLabel = formatInboundFromLabel({
-      isGroup: kind !== "direct",
+      isGroup: kind !== "dm",
       groupLabel: channelDisplay || roomLabel,
       groupId: channelId,
       groupFallback: roomLabel || "Channel",
@@ -648,7 +647,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
 
     const preview = bodyText.replace(/\s+/g, " ").slice(0, 160);
     const inboundLabel =
-      kind === "direct"
+      kind === "dm"
         ? `Mattermost DM from ${senderName}`
         : `Mattermost message in ${roomLabel} from ${senderName}`;
     core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
@@ -686,14 +685,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       });
     }
 
-    const to = kind === "direct" ? `user:${senderId}` : `channel:${channelId}`;
+    const to = kind === "dm" ? `user:${senderId}` : `channel:${channelId}`;
     const mediaPayload = buildMattermostMediaPayload(mediaList);
     const ctxPayload = core.channel.reply.finalizeInboundContext({
       Body: combinedBody,
       RawBody: bodyText,
       CommandBody: bodyText,
       From:
-        kind === "direct"
+        kind === "dm"
           ? `mattermost:${senderId}`
           : kind === "group"
             ? `mattermost:group:${channelId}`
@@ -704,7 +703,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       AccountId: route.accountId,
       ChatType: chatType,
       ConversationLabel: fromLabel,
-      GroupSubject: kind !== "direct" ? channelDisplay || roomLabel : undefined,
+      GroupSubject: kind !== "dm" ? channelDisplay || roomLabel : undefined,
       GroupChannel: channelName ? `#${channelName}` : undefined,
       GroupSpace: teamId,
       SenderName: senderName,
@@ -719,14 +718,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       ReplyToId: threadRootId,
       MessageThreadId: threadRootId,
       Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
-      WasMentioned: kind !== "direct" ? effectiveWasMentioned : undefined,
+      WasMentioned: kind !== "dm" ? effectiveWasMentioned : undefined,
       CommandAuthorized: commandAuthorized,
       OriginatingChannel: "mattermost" as const,
       OriginatingTo: to,
       ...mediaPayload,
     });
 
-    if (kind === "direct") {
+    if (kind === "dm") {
       const sessionCfg = cfg.session;
       const storePath = core.channel.session.resolveStorePath(sessionCfg?.store, {
         agentId: route.agentId,
@@ -761,12 +760,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       accountId: account.accountId,
     });
 
-    const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-      cfg,
-      agentId: route.agentId,
-      channel: "mattermost",
-      accountId: account.accountId,
-    });
+    const prefixContext = createReplyPrefixContext({ cfg, agentId: route.agentId });
 
     const typingCallbacks = createTypingCallbacks({
       start: () => sendTypingIndicator(channelId, threadRootId),
@@ -781,7 +775,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     });
     const { dispatcher, replyOptions, markDispatchIdle } =
       core.channel.reply.createReplyDispatcherWithTyping({
-        ...prefixOptions,
+        responsePrefix: prefixContext.responsePrefix,
+        responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
         humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
         deliver: async (payload: ReplyPayload) => {
           const mediaUrls = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
@@ -830,7 +825,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         ...replyOptions,
         disableBlockStreaming:
           typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
-        onModelSelected,
+        onModelSelected: prefixContext.onModelSelected,
       },
     });
     markDispatchIdle();

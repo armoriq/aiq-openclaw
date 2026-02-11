@@ -189,17 +189,7 @@ export async function updateNpmInstalledPlugins(params: {
       continue;
     }
 
-    let installPath: string;
-    try {
-      installPath = record.installPath ?? resolvePluginInstallDir(pluginId);
-    } catch (err) {
-      outcomes.push({
-        pluginId,
-        status: "error",
-        message: `Invalid install path for "${pluginId}": ${String(err)}`,
-      });
-      continue;
-    }
+    const installPath = record.installPath ?? resolvePluginInstallDir(pluginId);
     const currentVersion = await readInstalledPackageVersion(installPath);
 
     if (params.dryRun) {

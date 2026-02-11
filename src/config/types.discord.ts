@@ -38,8 +38,6 @@ export type DiscordGuildChannelConfig = {
   users?: Array<string | number>;
   /** Optional system prompt snippet for this channel. */
   systemPrompt?: string;
-  /** If false, omit thread starter context for this channel (default: true). */
-  includeThreadStarter?: boolean;
 };
 
 export type DiscordReactionNotificationMode = "off" | "own" | "all" | "allowlist";
@@ -75,8 +73,6 @@ export type DiscordActionConfig = {
   emojiUploads?: boolean;
   stickerUploads?: boolean;
   channels?: boolean;
-  /** Enable bot presence/activity changes (default: false). */
-  presence?: boolean;
 };
 
 export type DiscordIntentsConfig = {
@@ -157,8 +153,6 @@ export type DiscordAccountConfig = {
   intents?: DiscordIntentsConfig;
   /** PluralKit identity resolution for proxied messages. */
   pluralkit?: DiscordPluralKitConfig;
-  /** Outbound response prefix override for this channel/account. */
-  responsePrefix?: string;
 };
 
 export type DiscordConfig = {

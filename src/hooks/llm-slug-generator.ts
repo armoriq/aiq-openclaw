@@ -41,7 +41,6 @@ Reply with ONLY the slug, nothing else. Examples: "vendor-pitch", "api-design", 
     const result = await runEmbeddedPiAgent({
       sessionId: `slug-generator-${Date.now()}`,
       sessionKey: "temp:slug-generator",
-      agentId,
       sessionFile: tempSessionFile,
       workspaceDir,
       agentDir,

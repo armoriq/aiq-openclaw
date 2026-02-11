@@ -10,7 +10,6 @@ const createRes = () => {
     status: vi.fn(),
     json: vi.fn(),
     headersSent: false,
-    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
   res.status.mockReturnValue(res);
   res.json.mockReturnValue(res);
@@ -27,11 +26,9 @@ describe("createLineWebhookMiddleware", () => {
     const req = {
       headers: { "x-line-signature": sign(rawBody, secret) },
       body: rawBody,
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
     const res = createRes();
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await middleware(req, res, {} as any);
 
     expect(res.status).toHaveBeenCalledWith(200);
@@ -47,11 +44,9 @@ describe("createLineWebhookMiddleware", () => {
     const req = {
       headers: { "x-line-signature": sign(rawBody, secret) },
       body: Buffer.from(rawBody, "utf-8"),
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
     const res = createRes();
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await middleware(req, res, {} as any);
 
     expect(res.status).toHaveBeenCalledWith(200);
@@ -67,11 +62,9 @@ describe("createLineWebhookMiddleware", () => {
     const req = {
       headers: { "x-line-signature": sign(rawBody, secret) },
       body: rawBody,
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
     const res = createRes();
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await middleware(req, res, {} as any);
 
     expect(res.status).toHaveBeenCalledWith(400);
@@ -87,11 +80,9 @@ describe("createLineWebhookMiddleware", () => {
     const req = {
       headers: { "x-line-signature": "invalid-signature" },
       body: rawBody,
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
     const res = createRes();
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await middleware(req, res, {} as any);
 
     expect(res.status).toHaveBeenCalledWith(401);
@@ -108,11 +99,9 @@ describe("createLineWebhookMiddleware", () => {
     const req = {
       headers: { "x-line-signature": sign(rawBody, wrongSecret) },
       body: rawBody,
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
     const res = createRes();
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await middleware(req, res, {} as any);
 
     expect(res.status).toHaveBeenCalledWith(401);

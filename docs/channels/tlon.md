@@ -30,7 +30,7 @@ Local checkout (when running from a git repo):
 openclaw plugins install ./extensions/tlon
 ```
 
-Details: [Plugins](/tools/plugin)
+Details: [Plugins](/plugin)
 
 ## Setup
 

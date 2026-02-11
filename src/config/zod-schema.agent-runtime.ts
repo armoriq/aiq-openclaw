@@ -24,7 +24,6 @@ export const HeartbeatSchema = z
     includeReasoning: z.boolean().optional(),
     target: z.string().optional(),
     to: z.string().optional(),
-    accountId: z.string().optional(),
     prompt: z.string().optional(),
     ackMaxChars: z.number().int().nonnegative().optional(),
   })
@@ -192,7 +191,6 @@ export const ToolsWebFetchSchema = z
   .object({
     enabled: z.boolean().optional(),
     maxChars: z.number().int().positive().optional(),
-    maxCharsCap: z.number().int().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     cacheTtlMinutes: z.number().nonnegative().optional(),
     maxRedirects: z.number().int().nonnegative().optional(),
@@ -318,9 +316,7 @@ export const MemorySearchSchema = z
       })
       .strict()
       .optional(),
-    provider: z
-      .union([z.literal("openai"), z.literal("local"), z.literal("gemini"), z.literal("voyage")])
-      .optional(),
+    provider: z.union([z.literal("openai"), z.literal("local"), z.literal("gemini")]).optional(),
     remote: z
       .object({
         baseUrl: z.string().optional(),
@@ -340,13 +336,7 @@ export const MemorySearchSchema = z
       .strict()
       .optional(),
     fallback: z
-      .union([
-        z.literal("openai"),
-        z.literal("gemini"),
-        z.literal("local"),
-        z.literal("voyage"),
-        z.literal("none"),
-      ])
+      .union([z.literal("openai"), z.literal("gemini"), z.literal("local"), z.literal("none")])
       .optional(),
     model: z.string().optional(),
     local: z
@@ -437,7 +427,6 @@ export const AgentEntrySchema = z
     workspace: z.string().optional(),
     agentDir: z.string().optional(),
     model: AgentModelSchema.optional(),
-    skills: z.array(z.string()).optional(),
     memorySearch: MemorySearchSchema,
     humanDelay: HumanDelaySchema.optional(),
     heartbeat: HeartbeatSchema,
@@ -457,7 +446,6 @@ export const AgentEntrySchema = z
               .strict(),
           ])
           .optional(),
-        thinking: z.string().optional(),
       })
       .strict()
       .optional(),

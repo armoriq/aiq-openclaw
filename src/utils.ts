@@ -3,11 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { resolveOAuthDir } from "./config/paths.js";
 import { logVerbose, shouldLogVerbose } from "./globals.js";
-import {
-  expandHomePrefix,
-  resolveEffectiveHomeDir,
-  resolveRequiredHomeDir,
-} from "./infra/home-dir.js";
 
 export async function ensureDir(dir: string) {
   await fs.promises.mkdir(dir, { recursive: true });
@@ -244,11 +239,7 @@ export function resolveUserPath(input: string): string {
     return trimmed;
   }
   if (trimmed.startsWith("~")) {
-    const expanded = expandHomePrefix(trimmed, {
-      home: resolveRequiredHomeDir(process.env, os.homedir),
-      env: process.env,
-      homedir: os.homedir,
-    });
+    const expanded = trimmed.replace(/^~(?=$|[\\/])/, os.homedir());
     return path.resolve(expanded);
   }
   return path.resolve(trimmed);
@@ -262,7 +253,7 @@ export function resolveConfigDir(
   if (override) {
     return resolveUserPath(override);
   }
-  const newDir = path.join(resolveRequiredHomeDir(env, homedir), ".openclaw");
+  const newDir = path.join(homedir(), ".openclaw");
   try {
     const hasNew = fs.existsSync(newDir);
     if (hasNew) {
@@ -275,35 +266,35 @@ export function resolveConfigDir(
 }
 
 export function resolveHomeDir(): string | undefined {
-  return resolveEffectiveHomeDir(process.env, os.homedir);
-}
-
-function resolveHomeDisplayPrefix(): { home: string; prefix: string } | undefined {
-  const home = resolveHomeDir();
-  if (!home) {
+  const envHome = process.env.HOME?.trim();
+  if (envHome) {
+    return envHome;
+  }
+  const envProfile = process.env.USERPROFILE?.trim();
+  if (envProfile) {
+    return envProfile;
+  }
+  try {
+    const home = os.homedir();
+    return home?.trim() ? home : undefined;
+  } catch {
     return undefined;
   }
-  const explicitHome = process.env.OPENCLAW_HOME?.trim();
-  if (explicitHome) {
-    return { home, prefix: "$OPENCLAW_HOME" };
-  }
-  return { home, prefix: "~" };
 }
 
 export function shortenHomePath(input: string): string {
   if (!input) {
     return input;
   }
-  const display = resolveHomeDisplayPrefix();
-  if (!display) {
+  const home = resolveHomeDir();
+  if (!home) {
     return input;
   }
-  const { home, prefix } = display;
   if (input === home) {
-    return prefix;
+    return "~";
   }
-  if (input.startsWith(`${home}/`) || input.startsWith(`${home}\\`)) {
-    return `${prefix}${input.slice(home.length)}`;
+  if (input.startsWith(`${home}/`)) {
+    return `~${input.slice(home.length)}`;
   }
   return input;
 }
@@ -312,11 +303,11 @@ export function shortenHomeInString(input: string): string {
   if (!input) {
     return input;
   }
-  const display = resolveHomeDisplayPrefix();
-  if (!display) {
+  const home = resolveHomeDir();
+  if (!home) {
     return input;
   }
-  return input.split(display.home).join(display.prefix);
+  return input.split(home).join("~");
 }
 
 export function displayPath(input: string): string {

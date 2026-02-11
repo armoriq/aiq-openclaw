@@ -1,7 +1,5 @@
-import type { ChatType } from "../channels/chat-type.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { normalizeChatType } from "../channels/chat-type.js";
 import { listBindings } from "./bindings.js";
 import {
   buildAgentMainSessionKey,
@@ -12,11 +10,10 @@ import {
   sanitizeAgentId,
 } from "./session-key.js";
 
-/** @deprecated Use ChatType from channels/chat-type.js */
-export type RoutePeerKind = ChatType;
+export type RoutePeerKind = "dm" | "group" | "channel";
 
 export type RoutePeer = {
-  kind: ChatType;
+  kind: RoutePeerKind;
   id: string;
 };
 
@@ -92,7 +89,7 @@ export function buildAgentSessionKey(params: {
     mainKey: DEFAULT_MAIN_KEY,
     channel,
     accountId: params.accountId,
-    peerKind: peer?.kind ?? "direct",
+    peerKind: peer?.kind ?? "dm",
     peerId: peer ? normalizeId(peer.id) || "unknown" : null,
     dmScope: params.dmScope,
     identityLinks: params.identityLinks,
@@ -140,8 +137,7 @@ function matchesPeer(
   if (!m) {
     return false;
   }
-  // Backward compat: normalize "dm" to "direct" in config match rules
-  const kind = normalizeChatType(m.kind);
+  const kind = normalizeToken(m.kind);
   const id = normalizeId(m.id);
   if (!kind || !id) {
     return false;

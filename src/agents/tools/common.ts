@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { detectMime } from "../../media/mime.js";
 import { sanitizeToolResultImages } from "../tool-images.js";
 
-// oxlint-disable-next-line typescript/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: TypeBox schema type from pi-agent-core uses a different module instance.
 export type AnyAgentTool = AgentTool<any, unknown>;
 
 export type StringParamOptions = {

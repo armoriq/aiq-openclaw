@@ -1,8 +1,13 @@
+import type { Dispatcher } from "undici";
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
-import { fetchWithSsrFGuard } from "../../infra/net/fetch-guard.js";
-import { SsrFBlockedError } from "../../infra/net/ssrf.js";
+import {
+  closeDispatcher,
+  createPinnedDispatcher,
+  resolvePinnedHostname,
+  SsrFBlockedError,
+} from "../../infra/net/ssrf.js";
 import { wrapExternalContent, wrapWebContent } from "../../security/external-content.js";
 import { stringEnum } from "../schema/typebox.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
@@ -95,17 +100,6 @@ function resolveFetchReadabilityEnabled(fetch?: WebFetchConfig): boolean {
   return true;
 }
 
-function resolveFetchMaxCharsCap(fetch?: WebFetchConfig): number {
-  const raw =
-    fetch && "maxCharsCap" in fetch && typeof fetch.maxCharsCap === "number"
-      ? fetch.maxCharsCap
-      : undefined;
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
-    return DEFAULT_FETCH_MAX_CHARS;
-  }
-  return Math.max(100, Math.floor(raw));
-}
-
 function resolveFirecrawlConfig(fetch?: WebFetchConfig): FirecrawlFetchConfig {
   if (!fetch || typeof fetch !== "object") {
     return undefined;
@@ -171,10 +165,9 @@ function resolveFirecrawlMaxAgeMsOrDefault(firecrawl?: FirecrawlFetchConfig): nu
   return DEFAULT_FIRECRAWL_MAX_AGE_MS;
 }
 
-function resolveMaxChars(value: unknown, fallback: number, cap: number): number {
+function resolveMaxChars(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" && Number.isFinite(value) ? value : fallback;
-  const clamped = Math.max(100, Math.floor(parsed));
-  return Math.min(clamped, cap);
+  return Math.max(100, Math.floor(parsed));
 }
 
 function resolveMaxRedirects(value: unknown, fallback: number): number {
@@ -189,6 +182,79 @@ function looksLikeHtml(value: string): boolean {
   }
   const head = trimmed.slice(0, 256).toLowerCase();
   return head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+async function fetchWithRedirects(params: {
+  url: string;
+  maxRedirects: number;
+  timeoutSeconds: number;
+  userAgent: string;
+}): Promise<{ response: Response; finalUrl: string; dispatcher: Dispatcher }> {
+  const signal = withTimeout(undefined, params.timeoutSeconds * 1000);
+  const visited = new Set<string>();
+  let currentUrl = params.url;
+  let redirectCount = 0;
+
+  while (true) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(currentUrl);
+    } catch {
+      throw new Error("Invalid URL: must be http or https");
+    }
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      throw new Error("Invalid URL: must be http or https");
+    }
+
+    const pinned = await resolvePinnedHostname(parsedUrl.hostname);
+    const dispatcher = createPinnedDispatcher(pinned);
+    let res: Response;
+    try {
+      res = await fetch(parsedUrl.toString(), {
+        method: "GET",
+        headers: {
+          Accept: "*/*",
+          "User-Agent": params.userAgent,
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        signal,
+        redirect: "manual",
+        dispatcher,
+      } as RequestInit);
+    } catch (err) {
+      await closeDispatcher(dispatcher);
+      throw err;
+    }
+
+    if (isRedirectStatus(res.status)) {
+      const location = res.headers.get("location");
+      if (!location) {
+        await closeDispatcher(dispatcher);
+        throw new Error(`Redirect missing location header (${res.status})`);
+      }
+      redirectCount += 1;
+      if (redirectCount > params.maxRedirects) {
+        await closeDispatcher(dispatcher);
+        throw new Error(`Too many redirects (limit: ${params.maxRedirects})`);
+      }
+      const nextUrl = new URL(location, parsedUrl).toString();
+      if (visited.has(nextUrl)) {
+        await closeDispatcher(dispatcher);
+        throw new Error("Redirect loop detected");
+      }
+      visited.add(nextUrl);
+      void res.body?.cancel();
+      await closeDispatcher(dispatcher);
+      currentUrl = nextUrl;
+      continue;
+    }
+
+    return { response: res, finalUrl: currentUrl, dispatcher };
+  }
 }
 
 function formatWebFetchErrorDetail(params: {
@@ -399,24 +465,18 @@ async function runWebFetch(params: {
 
   const start = Date.now();
   let res: Response;
-  let release: (() => Promise<void>) | null = null;
+  let dispatcher: Dispatcher | null = null;
   let finalUrl = params.url;
   try {
-    const result = await fetchWithSsrFGuard({
+    const result = await fetchWithRedirects({
       url: params.url,
       maxRedirects: params.maxRedirects,
-      timeoutMs: params.timeoutSeconds * 1000,
-      init: {
-        headers: {
-          Accept: "*/*",
-          "User-Agent": params.userAgent,
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      },
+      timeoutSeconds: params.timeoutSeconds,
+      userAgent: params.userAgent,
     });
     res = result.response;
     finalUrl = result.finalUrl;
-    release = result.release;
+    dispatcher = result.dispatcher;
   } catch (error) {
     if (error instanceof SsrFBlockedError) {
       throw error;
@@ -570,9 +630,7 @@ async function runWebFetch(params: {
     writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);
     return payload;
   } finally {
-    if (release) {
-      await release();
-    }
+    await closeDispatcher(dispatcher);
   }
 }
 
@@ -659,15 +717,10 @@ export function createWebFetchTool(options?: {
       const url = readStringParam(params, "url", { required: true });
       const extractMode = readStringParam(params, "extractMode") === "text" ? "text" : "markdown";
       const maxChars = readNumberParam(params, "maxChars", { integer: true });
-      const maxCharsCap = resolveFetchMaxCharsCap(fetch);
       const result = await runWebFetch({
         url,
         extractMode,
-        maxChars: resolveMaxChars(
-          maxChars ?? fetch?.maxChars,
-          DEFAULT_FETCH_MAX_CHARS,
-          maxCharsCap,
-        ),
+        maxChars: resolveMaxChars(maxChars ?? fetch?.maxChars, DEFAULT_FETCH_MAX_CHARS),
         maxRedirects: resolveMaxRedirects(fetch?.maxRedirects, DEFAULT_FETCH_MAX_REDIRECTS),
         timeoutSeconds: resolveTimeoutSeconds(fetch?.timeoutSeconds, DEFAULT_TIMEOUT_SECONDS),
         cacheTtlMs: resolveCacheTtlMs(fetch?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES),

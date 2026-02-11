@@ -6,17 +6,10 @@ import {
   refreshChutesTokens,
 } from "./chutes-oauth.js";
 
-const urlToString = (url: Request | URL | string): string => {
-  if (typeof url === "string") {
-    return url;
-  }
-  return "url" in url ? url.url : String(url);
-};
-
 describe("chutes-oauth", () => {
   it("exchanges code for tokens and stores username as email", async () => {
     const fetchFn: typeof fetch = async (input, init) => {
-      const url = urlToString(input);
+      const url = String(input);
       if (url === CHUTES_TOKEN_ENDPOINT) {
         expect(init?.method).toBe("POST");
         expect(
@@ -66,7 +59,7 @@ describe("chutes-oauth", () => {
 
   it("refreshes tokens using stored client id and falls back to old refresh token", async () => {
     const fetchFn: typeof fetch = async (input, init) => {
-      const url = urlToString(input);
+      const url = String(input);
       if (url !== CHUTES_TOKEN_ENDPOINT) {
         return new Response("not found", { status: 404 });
       }

@@ -1,12 +1,11 @@
 import type { Command } from "commander";
 import type { NodesRpcOpts } from "./types.js";
-import { formatTimeAgo } from "../../infra/format-time/format-relative.ts";
 import { defaultRuntime } from "../../runtime.js";
 import { renderTable } from "../../terminal/table.js";
 import { shortenHomeInString } from "../../utils.js";
 import { parseDurationMs } from "../parse-duration.js";
 import { getNodesTheme, runNodesCommand } from "./cli-utils.js";
-import { formatPermissions, parseNodeList, parsePairingList } from "./format.js";
+import { formatAge, formatPermissions, parseNodeList, parsePairingList } from "./format.js";
 import { callGatewayCli, nodesCallOpts, resolveNodeId } from "./rpc.js";
 
 function formatVersionLabel(raw: string) {
@@ -179,7 +178,7 @@ export function registerNodesStatusCommands(nodes: Command) {
             const connected = n.connected ? ok("connected") : muted("disconnected");
             const since =
               typeof n.connectedAtMs === "number"
-                ? ` (${formatTimeAgo(Math.max(0, now - n.connectedAtMs))})`
+                ? ` (${formatAge(Math.max(0, now - n.connectedAtMs))} ago)`
                 : "";
 
             return {
@@ -362,7 +361,7 @@ export function registerNodesStatusCommands(nodes: Command) {
               IP: r.remoteIp ?? "",
               Requested:
                 typeof r.ts === "number"
-                  ? formatTimeAgo(Math.max(0, now - r.ts))
+                  ? `${formatAge(Math.max(0, now - r.ts))} ago`
                   : muted("unknown"),
               Repair: r.isRepair ? warn("yes") : "",
             }));
@@ -398,7 +397,7 @@ export function registerNodesStatusCommands(nodes: Command) {
                 IP: n.remoteIp ?? "",
                 LastConnect:
                   typeof lastConnectedAtMs === "number"
-                    ? formatTimeAgo(Math.max(0, now - lastConnectedAtMs))
+                    ? `${formatAge(Math.max(0, now - lastConnectedAtMs))} ago`
                     : muted("unknown"),
               };
             });

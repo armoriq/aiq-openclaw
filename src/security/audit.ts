@@ -16,12 +16,10 @@ import {
   collectExposureMatrixFindings,
   collectHooksHardeningFindings,
   collectIncludeFilePermFindings,
-  collectInstalledSkillsCodeSafetyFindings,
   collectModelHygieneFindings,
   collectSmallModelRiskFindings,
   collectPluginsTrustFindings,
   collectSecretsInConfigFindings,
-  collectPluginsCodeSafetyFindings,
   collectStateDeepFilesystemFindings,
   collectSyncedFolderFindings,
   readConfigSnapshotForAudit,
@@ -828,7 +826,6 @@ async function collectChannelSecurityFindings(params: {
 
       if (!hasAnySenderAllowlist) {
         const providerSetting = (telegramCfg.commands as { nativeSkills?: unknown } | undefined)
-          // oxlint-disable-next-line typescript/no-explicit-any
           ?.nativeSkills as any;
         const skillsEnabled = resolveNativeSkillsEnabled({
           providerId: "telegram",
@@ -957,10 +954,6 @@ export async function runSecurityAudit(opts: SecurityAuditOptions): Promise<Secu
       ...(await collectStateDeepFilesystemFindings({ cfg, env, stateDir, platform, execIcacls })),
     );
     findings.push(...(await collectPluginsTrustFindings({ cfg, stateDir })));
-    if (opts.deep === true) {
-      findings.push(...(await collectPluginsCodeSafetyFindings({ stateDir })));
-      findings.push(...(await collectInstalledSkillsCodeSafetyFindings({ cfg, stateDir })));
-    }
   }
 
   if (opts.includeChannelSecurity !== false) {

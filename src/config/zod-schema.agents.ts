@@ -22,13 +22,7 @@ export const BindingsSchema = z
             accountId: z.string().optional(),
             peer: z
               .object({
-                kind: z.union([
-                  z.literal("direct"),
-                  z.literal("group"),
-                  z.literal("channel"),
-                  /** @deprecated Use `direct` instead. Kept for backward compatibility. */
-                  z.literal("dm"),
-                ]),
+                kind: z.union([z.literal("dm"), z.literal("group"), z.literal("channel")]),
                 id: z.string(),
               })
               .strict()

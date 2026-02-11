@@ -26,9 +26,7 @@ const AUDIO_MIME_CAF = new Set(["audio/x-caf", "audio/caf"]);
 function sanitizeFilename(input: string | undefined, fallback: string): string {
   const trimmed = input?.trim() ?? "";
   const base = trimmed ? path.basename(trimmed) : "";
-  const name = base || fallback;
-  // Strip characters that could enable multipart header injection (CWE-93)
-  return name.replace(/[\r\n"\\]/g, "_");
+  return base || fallback;
 }
 
 function ensureExtension(filename: string, extension: string, fallbackBase: string): string {

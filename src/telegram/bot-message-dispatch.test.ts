@@ -1,4 +1,3 @@
-import type { Bot } from "grammy";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createTelegramDraftStream = vi.hoisted(() => vi.fn());
@@ -60,7 +59,6 @@ describe("dispatchTelegramMessage draft streaming", () => {
       isGroup: false,
       resolvedThreadId: undefined,
       replyThreadId: 777,
-      threadSpec: { id: 777, scope: "dm" },
       historyKey: undefined,
       historyLimit: 0,
       groupHistories: new Map(),
@@ -73,25 +71,16 @@ describe("dispatchTelegramMessage draft streaming", () => {
       removeAckAfterReply: false,
     };
 
-    const bot = { api: { sendMessageDraft: vi.fn() } } as unknown as Bot;
-    const runtime = {
-      log: vi.fn(),
-      error: vi.fn(),
-      exit: () => {
-        throw new Error("exit");
-      },
-    };
-
     await dispatchTelegramMessage({
       context,
-      bot,
+      bot: { api: {} },
       cfg: {},
-      runtime,
+      runtime: {},
       replyToMode: "first",
       streamMode: "partial",
       textLimit: 4096,
       telegramCfg: {},
-      opts: { token: "token" },
+      opts: {},
       resolveBotTopicsEnabled,
     });
 
@@ -99,13 +88,13 @@ describe("dispatchTelegramMessage draft streaming", () => {
     expect(createTelegramDraftStream).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: 123,
-        thread: { id: 777, scope: "dm" },
+        messageThreadId: 777,
       }),
     );
     expect(draftStream.update).toHaveBeenCalledWith("Hello");
     expect(deliverReplies).toHaveBeenCalledWith(
       expect.objectContaining({
-        thread: { id: 777, scope: "dm" },
+        messageThreadId: 777,
       }),
     );
   });

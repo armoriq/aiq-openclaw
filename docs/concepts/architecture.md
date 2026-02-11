@@ -97,7 +97,7 @@ Client                    Gateway
 - Gateway auth (`gateway.auth.*`) still applies to **all** connections, local or
   remote.
 
-Details: [Gateway protocol](/gateway/protocol), [Pairing](/channels/pairing),
+Details: [Gateway protocol](/gateway/protocol), [Pairing](/start/pairing),
 [Security](/gateway/security).
 
 ## Protocol typing and codegen
@@ -110,11 +110,9 @@ Details: [Gateway protocol](/gateway/protocol), [Pairing](/channels/pairing),
 
 - Preferred: Tailscale or VPN.
 - Alternative: SSH tunnel
-
   ```bash
   ssh -N -L 18789:127.0.0.1:18789 user@host
   ```
-
 - The same handshake + auth token apply over the tunnel.
 - TLS + optional pinning can be enabled for WS in remote setups.
 

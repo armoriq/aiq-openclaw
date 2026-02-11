@@ -17,7 +17,6 @@ describe("web processMessage inbound contract", () => {
     capturedCtx = undefined;
 
     await processMessage({
-      // oxlint-disable-next-line typescript/no-explicit-any
       cfg: { messages: {} } as any,
       msg: {
         id: "msg1",
@@ -30,13 +29,11 @@ describe("web processMessage inbound contract", () => {
         senderE164: "+15550002222",
         groupSubject: "Test Group",
         groupParticipants: [],
-        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       route: {
         agentId: "main",
         accountId: "default",
         sessionKey: "agent:main:whatsapp:group:123",
-        // oxlint-disable-next-line typescript/no-explicit-any
       } as any,
       groupHistoryKey: "123@g.us",
       groupHistories: new Map(),
@@ -44,9 +41,7 @@ describe("web processMessage inbound contract", () => {
       connectionId: "conn",
       verbose: false,
       maxMediaBytes: 1,
-      // oxlint-disable-next-line typescript/no-explicit-any
       replyResolver: (async () => undefined) as any,
-      // oxlint-disable-next-line typescript/no-explicit-any
       replyLogger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as any,
       backgroundTasks: new Set(),
       rememberSentText: (_text: string | undefined, _opts: unknown) => {},
@@ -54,11 +49,9 @@ describe("web processMessage inbound contract", () => {
       echoForget: () => {},
       buildCombinedEchoKey: () => "echo",
       groupHistory: [],
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any);
 
     expect(capturedCtx).toBeTruthy();
-    // oxlint-disable-next-line typescript/no-explicit-any
     expectInboundContextContract(capturedCtx as any);
   });
 });

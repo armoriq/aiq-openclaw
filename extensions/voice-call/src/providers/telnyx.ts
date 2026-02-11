@@ -21,21 +21,15 @@ import type { VoiceCallProvider } from "./base.js";
  * Uses Telnyx Call Control API v2 for managing calls.
  * @see https://developers.telnyx.com/docs/api/v2/call-control
  */
-export interface TelnyxProviderOptions {
-  /** Allow unsigned webhooks when no public key is configured */
-  allowUnsignedWebhooks?: boolean;
-}
-
 export class TelnyxProvider implements VoiceCallProvider {
   readonly name = "telnyx" as const;
 
   private readonly apiKey: string;
   private readonly connectionId: string;
   private readonly publicKey: string | undefined;
-  private readonly options: TelnyxProviderOptions;
   private readonly baseUrl = "https://api.telnyx.com/v2";
 
-  constructor(config: TelnyxConfig, options: TelnyxProviderOptions = {}) {
+  constructor(config: TelnyxConfig) {
     if (!config.apiKey) {
       throw new Error("Telnyx API key is required");
     }
@@ -46,7 +40,6 @@ export class TelnyxProvider implements VoiceCallProvider {
     this.apiKey = config.apiKey;
     this.connectionId = config.connectionId;
     this.publicKey = config.publicKey;
-    this.options = options;
   }
 
   /**
@@ -83,14 +76,8 @@ export class TelnyxProvider implements VoiceCallProvider {
    */
   verifyWebhook(ctx: WebhookContext): WebhookVerificationResult {
     if (!this.publicKey) {
-      if (this.options.allowUnsignedWebhooks) {
-        console.warn("[telnyx] Webhook verification skipped (no public key configured)");
-        return { ok: true, reason: "verification skipped (no public key configured)" };
-      }
-      return {
-        ok: false,
-        reason: "Missing telnyx.publicKey (configure to verify webhooks)",
-      };
+      // No public key configured, skip verification (not recommended for production)
+      return { ok: true };
     }
 
     const signature = ctx.headers["telnyx-signature-ed25519"];

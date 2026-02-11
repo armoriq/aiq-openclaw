@@ -1,5 +1,3 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk";
 import { describe, expect, it } from "vitest";
 import { mattermostPlugin } from "./channel.js";
 
@@ -45,28 +43,6 @@ describe("mattermostPlugin", () => {
         allowFrom: ["@Alice", "user:USER123", "mattermost:BOT999"],
       });
       expect(formatted).toEqual(["@alice", "user123", "bot999"]);
-    });
-
-    it("uses account responsePrefix overrides", () => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          mattermost: {
-            responsePrefix: "[Channel]",
-            accounts: {
-              default: { responsePrefix: "[Account]" },
-            },
-          },
-        },
-      };
-
-      const prefixContext = createReplyPrefixOptions({
-        cfg,
-        agentId: "main",
-        channel: "mattermost",
-        accountId: "default",
-      });
-
-      expect(prefixContext.responsePrefix).toBe("[Account]");
     });
   });
 });

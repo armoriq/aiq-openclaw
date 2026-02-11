@@ -1,4 +1,3 @@
-import type { DmPolicy } from "openclaw/plugin-sdk";
 import {
   addWildcardAllowFrom,
   formatDocsLink,
@@ -7,11 +6,11 @@ import {
   type ChannelOnboardingDmPolicy,
   type WizardPrompter,
 } from "openclaw/plugin-sdk";
-import type { CoreConfig } from "./types.js";
+import type { CoreConfig, DmPolicy } from "./types.js";
 import { listMatrixDirectoryGroupsLive } from "./directory-live.js";
+import { listMatrixDirectoryPeersLive } from "./directory-live.js";
 import { resolveMatrixAccount } from "./matrix/accounts.js";
 import { ensureMatrixSdkInstalled, isMatrixSdkAvailable } from "./matrix/deps.js";
-import { resolveMatrixTargets } from "./resolve-targets.js";
 
 const channel = "matrix" as const;
 
@@ -66,16 +65,14 @@ async function promptMatrixAllowFrom(params: {
 
   while (true) {
     const entry = await prompter.text({
-      message: "Matrix allowFrom (full @user:server; display name only if unique)",
+      message: "Matrix allowFrom (username or user id)",
       placeholder: "@user:server",
       initialValue: existingAllowFrom[0] ? String(existingAllowFrom[0]) : undefined,
       validate: (value) => (String(value ?? "").trim() ? undefined : "Required"),
     });
     const parts = parseInput(String(entry));
     const resolvedIds: string[] = [];
-    const pending: string[] = [];
-    const unresolved: string[] = [];
-    const unresolvedNotes: string[] = [];
+    let unresolved: string[] = [];
 
     for (const part of parts) {
       if (isFullUserId(part)) {
@@ -86,33 +83,28 @@ async function promptMatrixAllowFrom(params: {
         unresolved.push(part);
         continue;
       }
-      pending.push(part);
-    }
-
-    if (pending.length > 0) {
-      const results = await resolveMatrixTargets({
+      const results = await listMatrixDirectoryPeersLive({
         cfg,
-        inputs: pending,
-        kind: "user",
+        query: part,
+        limit: 5,
       }).catch(() => []);
-      for (const result of results) {
-        if (result?.resolved && result.id) {
-          resolvedIds.push(result.id);
-          continue;
+      const match = results.find((result) => result.id);
+      if (match?.id) {
+        resolvedIds.push(match.id);
+        if (results.length > 1) {
+          await prompter.note(
+            `Multiple matches for "${part}", using ${match.id}.`,
+            "Matrix allowlist",
+          );
         }
-        if (result?.input) {
-          unresolved.push(result.input);
-          if (result.note) {
-            unresolvedNotes.push(`${result.input}: ${result.note}`);
-          }
-        }
+      } else {
+        unresolved.push(part);
       }
     }
 
     if (unresolved.length > 0) {
-      const details = unresolvedNotes.length > 0 ? unresolvedNotes : unresolved;
       await prompter.note(
-        `Could not resolve:\n${details.join("\n")}\nUse full @user:server IDs.`,
+        `Could not resolve: ${unresolved.join(", ")}. Use full @user:server IDs.`,
         "Matrix allowlist",
       );
       continue;

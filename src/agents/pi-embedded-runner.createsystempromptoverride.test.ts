@@ -99,12 +99,12 @@ const _readSessionMessages = async (sessionFile: string) => {
 };
 
 describe("createSystemPromptOverride", () => {
-  it("returns the override prompt trimmed", () => {
+  it("returns the override prompt regardless of default prompt", () => {
     const override = createSystemPromptOverride("OVERRIDE");
-    expect(override()).toBe("OVERRIDE");
+    expect(override("DEFAULT")).toBe("OVERRIDE");
   });
   it("returns an empty string for blank overrides", () => {
     const override = createSystemPromptOverride("  \n  ");
-    expect(override()).toBe("");
+    expect(override("DEFAULT")).toBe("");
   });
 });

@@ -101,7 +101,7 @@ const tlonOutbound: ChannelOutboundAdapter = {
         error: new Error(`Invalid Tlon target. Use ${formatTargetHint()}`),
       };
     }
-    if (parsed.kind === "direct") {
+    if (parsed.kind === "dm") {
       return { ok: true, to: parsed.ship };
     }
     return { ok: true, to: parsed.nest };
@@ -127,7 +127,7 @@ const tlonOutbound: ChannelOutboundAdapter = {
 
     try {
       const fromShip = normalizeShip(account.ship);
-      if (parsed.kind === "direct") {
+      if (parsed.kind === "dm") {
         return await sendDm({
           api,
           fromShip,
@@ -298,7 +298,7 @@ export const tlonPlugin: ChannelPlugin = {
       if (!parsed) {
         return target.trim();
       }
-      if (parsed.kind === "direct") {
+      if (parsed.kind === "dm") {
         return parsed.ship;
       }
       return parsed.nest;
@@ -355,7 +355,7 @@ export const tlonPlugin: ChannelPlugin = {
         } finally {
           await api.delete();
         }
-      } catch (error) {
+      } catch (error: any) {
         return { ok: false, error: error?.message ?? String(error) };
       }
     },

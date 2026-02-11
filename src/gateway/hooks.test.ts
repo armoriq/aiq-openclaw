@@ -39,25 +39,29 @@ describe("gateway hooks helpers", () => {
     expect(() => resolveHooksConfig(cfg)).toThrow("hooks.path may not be '/'");
   });
 
-  test("extractHookToken prefers bearer > header", () => {
+  test("extractHookToken prefers bearer > header > query", () => {
     const req = {
       headers: {
         authorization: "Bearer top",
         "x-openclaw-token": "header",
       },
     } as unknown as IncomingMessage;
-    const result1 = extractHookToken(req);
-    expect(result1).toBe("top");
+    const url = new URL("http://localhost/hooks/wake?token=query");
+    const result1 = extractHookToken(req, url);
+    expect(result1.token).toBe("top");
+    expect(result1.fromQuery).toBe(false);
 
     const req2 = {
       headers: { "x-openclaw-token": "header" },
     } as unknown as IncomingMessage;
-    const result2 = extractHookToken(req2);
-    expect(result2).toBe("header");
+    const result2 = extractHookToken(req2, url);
+    expect(result2.token).toBe("header");
+    expect(result2.fromQuery).toBe(false);
 
     const req3 = { headers: {} } as unknown as IncomingMessage;
-    const result3 = extractHookToken(req3);
-    expect(result3).toBeUndefined();
+    const result3 = extractHookToken(req3, url);
+    expect(result3.token).toBe("query");
+    expect(result3.fromQuery).toBe(true);
   });
 
   test("normalizeWakePayload trims + validates", () => {

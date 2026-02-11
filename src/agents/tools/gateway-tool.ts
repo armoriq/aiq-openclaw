@@ -12,8 +12,6 @@ import { stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool } from "./gateway.js";
 
-const DEFAULT_UPDATE_TIMEOUT_MS = 20 * 60_000;
-
 function resolveBaseHashFromSnapshot(snapshot: unknown): string | undefined {
   if (!snapshot || typeof snapshot !== "object") {
     return undefined;
@@ -235,15 +233,11 @@ export function createGatewayTool(opts?: {
           typeof params.restartDelayMs === "number" && Number.isFinite(params.restartDelayMs)
             ? Math.floor(params.restartDelayMs)
             : undefined;
-        const updateGatewayOpts = {
-          ...gatewayOpts,
-          timeoutMs: timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS,
-        };
-        const result = await callGatewayTool("update.run", updateGatewayOpts, {
+        const result = await callGatewayTool("update.run", gatewayOpts, {
           sessionKey,
           note,
           restartDelayMs,
-          timeoutMs: timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS,
+          timeoutMs,
         });
         return jsonResult({ ok: true, result });
       }

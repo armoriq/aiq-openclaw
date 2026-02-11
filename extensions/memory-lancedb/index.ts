@@ -6,8 +6,8 @@
  * Provides seamless auto-recall and auto-capture via lifecycle hooks.
  */
 
-import type * as LanceDB from "@lancedb/lancedb";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import * as lancedb from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
@@ -22,19 +22,6 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
-
-let lancedbImportPromise: Promise<typeof import("@lancedb/lancedb")> | null = null;
-const loadLanceDB = async (): Promise<typeof import("@lancedb/lancedb")> => {
-  if (!lancedbImportPromise) {
-    lancedbImportPromise = import("@lancedb/lancedb");
-  }
-  try {
-    return await lancedbImportPromise;
-  } catch (err) {
-    // Common on macOS today: upstream package may not ship darwin native bindings.
-    throw new Error(`memory-lancedb: failed to load LanceDB. ${String(err)}`, { cause: err });
-  }
-};
 
 type MemoryEntry = {
   id: string;
@@ -57,8 +44,8 @@ type MemorySearchResult = {
 const TABLE_NAME = "memories";
 
 class MemoryDB {
-  private db: LanceDB.Connection | null = null;
-  private table: LanceDB.Table | null = null;
+  private db: lancedb.Connection | null = null;
+  private table: lancedb.Table | null = null;
   private initPromise: Promise<void> | null = null;
 
   constructor(
@@ -79,7 +66,6 @@ class MemoryDB {
   }
 
   private async doInitialize(): Promise<void> {
-    const lancedb = await loadLanceDB();
     this.db = await lancedb.connect(this.dbPath);
     const tables = await this.db.tableNames();
 
@@ -195,7 +181,7 @@ const MEMORY_TRIGGERS = [
   /always|never|important/i,
 ];
 
-export function shouldCapture(text: string): boolean {
+function shouldCapture(text: string): boolean {
   if (text.length < 10 || text.length > 500) {
     return false;
   }
@@ -219,7 +205,7 @@ export function shouldCapture(text: string): boolean {
   return MEMORY_TRIGGERS.some((r) => r.test(text));
 }
 
-export function detectCategory(text: string): MemoryCategory {
+function detectCategory(text: string): MemoryCategory {
   const lower = text.toLowerCase();
   if (/prefer|radši|like|love|hate|want/i.test(lower)) {
     return "preference";

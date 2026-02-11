@@ -19,7 +19,7 @@ import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.j
 import { createReplyDispatcherWithTyping } from "../../auto-reply/reply/reply-dispatcher.js";
 import { resolveControlCommandGate } from "../../channels/command-gating.js";
 import { logInboundDrop, logTypingFailure } from "../../channels/logging.js";
-import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
+import { createReplyPrefixContext } from "../../channels/reply-prefix.js";
 import { recordInboundSession } from "../../channels/session.js";
 import { createTypingCallbacks } from "../../channels/typing.js";
 import { readSessionUpdatedAt, resolveStorePath } from "../../config/sessions.js";
@@ -77,7 +77,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       channel: "signal",
       accountId: deps.accountId,
       peer: {
-        kind: entry.isGroup ? "group" : "direct",
+        kind: entry.isGroup ? "group" : "dm",
         id: entry.isGroup ? (entry.groupId ?? "unknown") : entry.senderPeerId,
       },
     });
@@ -171,12 +171,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       logVerbose(`signal inbound: from=${ctxPayload.From} len=${body.length} preview="${preview}"`);
     }
 
-    const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-      cfg: deps.cfg,
-      agentId: route.agentId,
-      channel: "signal",
-      accountId: route.accountId,
-    });
+    const prefixContext = createReplyPrefixContext({ cfg: deps.cfg, agentId: route.agentId });
 
     const typingCallbacks = createTypingCallbacks({
       start: async () => {
@@ -200,7 +195,8 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     });
 
     const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
-      ...prefixOptions,
+      responsePrefix: prefixContext.responsePrefix,
+      responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
       humanDelay: resolveHumanDelayConfig(deps.cfg, route.agentId),
       deliver: async (payload) => {
         await deps.deliverReplies({
@@ -228,7 +224,9 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         ...replyOptions,
         disableBlockStreaming:
           typeof deps.blockStreaming === "boolean" ? !deps.blockStreaming : undefined,
-        onModelSelected,
+        onModelSelected: (ctx) => {
+          prefixContext.onModelSelected(ctx);
+        },
       },
     });
     markDispatchIdle();
@@ -370,7 +368,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         channel: "signal",
         accountId: deps.accountId,
         peer: {
-          kind: isGroup ? "group" : "direct",
+          kind: isGroup ? "group" : "dm",
           id: isGroup ? (groupId ?? "unknown") : senderPeerId,
         },
       });

@@ -16,12 +16,6 @@ export type ModelAliasIndex = {
   byKey: Map<string, string[]>;
 };
 
-const ANTHROPIC_MODEL_ALIASES: Record<string, string> = {
-  "opus-4.6": "claude-opus-4-6",
-  "opus-4.5": "claude-opus-4-5",
-  "sonnet-4.5": "claude-sonnet-4-5",
-};
-
 function normalizeAliasKey(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -65,7 +59,13 @@ function normalizeAnthropicModelId(model: string): string {
     return trimmed;
   }
   const lower = trimmed.toLowerCase();
-  return ANTHROPIC_MODEL_ALIASES[lower] ?? trimmed;
+  if (lower === "opus-4.5") {
+    return "claude-opus-4-5";
+  }
+  if (lower === "sonnet-4.5") {
+    return "claude-sonnet-4-5";
+  }
+  return trimmed;
 }
 
 function normalizeProviderModelId(provider: string, model: string): string {
@@ -97,33 +97,6 @@ export function parseModelRef(raw: string, defaultProvider: string): ModelRef | 
   }
   const normalizedModel = normalizeProviderModelId(provider, model);
   return { provider, model: normalizedModel };
-}
-
-export function resolveAllowlistModelKey(raw: string, defaultProvider: string): string | null {
-  const parsed = parseModelRef(raw, defaultProvider);
-  if (!parsed) {
-    return null;
-  }
-  return modelKey(parsed.provider, parsed.model);
-}
-
-export function buildConfiguredAllowlistKeys(params: {
-  cfg: OpenClawConfig | undefined;
-  defaultProvider: string;
-}): Set<string> | null {
-  const rawAllowlist = Object.keys(params.cfg?.agents?.defaults?.models ?? {});
-  if (rawAllowlist.length === 0) {
-    return null;
-  }
-
-  const keys = new Set<string>();
-  for (const raw of rawAllowlist) {
-    const key = resolveAllowlistModelKey(String(raw ?? ""), params.defaultProvider);
-    if (key) {
-      keys.add(key);
-    }
-  }
-  return keys.size > 0 ? keys : null;
 }
 
 export function buildModelAliasIndex(params: {

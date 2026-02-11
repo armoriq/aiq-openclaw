@@ -65,8 +65,6 @@ describe("cron run log", () => {
       jobId: "a",
       action: "finished",
       status: "skipped",
-      sessionId: "run-123",
-      sessionKey: "agent:main:cron:a:run:run-123",
     });
 
     const allA = await readCronRunLogEntries(logPathA, { limit: 10 });
@@ -80,8 +78,6 @@ describe("cron run log", () => {
 
     const lastOne = await readCronRunLogEntries(logPathA, { limit: 1 });
     expect(lastOne.map((e) => e.ts)).toEqual([3]);
-    expect(lastOne[0]?.sessionId).toBe("run-123");
-    expect(lastOne[0]?.sessionKey).toBe("agent:main:cron:a:run:run-123");
 
     const onlyB = await readCronRunLogEntries(logPathB, {
       limit: 10,

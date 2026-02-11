@@ -10,7 +10,7 @@ import { resolveChannelCapabilities } from "../../../config/channel-capabilities
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
-import { isSubagentSessionKey, normalizeAgentId } from "../../../routing/session-key.js";
+import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { resolveSignalReactionLevel } from "../../../signal/reaction-level.js";
 import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
 import { resolveTelegramReactionLevel } from "../../../telegram/reaction-level.js";
@@ -46,10 +46,8 @@ import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools } from "../../pi-tools.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
-import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import { acquireSessionWriteLock } from "../../session-write-lock.js";
-import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -218,6 +216,7 @@ export async function runEmbeddedAttempt(
           agentAccountId: params.agentAccountId,
           messageTo: params.messageTo,
           messageThreadId: params.messageThreadId,
+          runId: params.runId,
           groupId: params.groupId,
           groupChannel: params.groupChannel,
           groupSpace: params.groupSpace,
@@ -226,7 +225,6 @@ export async function runEmbeddedAttempt(
           senderName: params.senderName,
           senderUsername: params.senderUsername,
           senderE164: params.senderE164,
-          senderIsOwner: params.senderIsOwner,
           sessionKey: params.sessionKey ?? params.sessionId,
           agentDir,
           workspaceDir: effectiveWorkspace,
@@ -240,9 +238,6 @@ export async function runEmbeddedAttempt(
           replyToMode: params.replyToMode,
           hasRepliedRef: params.hasRepliedRef,
           modelHasVision,
-          requireExplicitMessageTarget:
-            params.requireExplicitMessageTarget ?? isSubagentSessionKey(params.sessionKey),
-          disableMessageTool: params.disableMessageTool,
         });
     const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
     logToolSchemasForGoogle({ tools, provider: params.provider });
@@ -332,7 +327,6 @@ export async function runEmbeddedAttempt(
         node: process.version,
         model: `${params.provider}/${params.modelId}`,
         defaultModel: defaultModelLabel,
-        shell: detectRuntimeShell(),
         channel: runtimeChannel,
         capabilities: runtimeCapabilities,
         channelActions,
@@ -373,7 +367,6 @@ export async function runEmbeddedAttempt(
       userTime,
       userTimeFormat,
       contextFiles,
-      memoryCitationsMode: params.config?.memory?.citations,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
@@ -407,10 +400,6 @@ export async function runEmbeddedAttempt(
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
     try {
-      await repairSessionFileIfNeeded({
-        sessionFile: params.sessionFile,
-        warn: (message) => log.warn(message),
-      });
       const hadSessionFile = await fs
         .stat(params.sessionFile)
         .then(() => true)
@@ -469,6 +458,13 @@ export async function runEmbeddedAttempt(
             {
               agentId: sessionAgentId,
               sessionKey: params.sessionKey,
+              messageChannel: runtimeChannel ?? undefined,
+              accountId: params.agentAccountId,
+              senderId: params.senderId ?? undefined,
+              senderName: params.senderName ?? undefined,
+              senderUsername: params.senderUsername ?? undefined,
+              senderE164: params.senderE164 ?? undefined,
+              runId: params.runId,
             },
           )
         : [];
@@ -487,7 +483,7 @@ export async function runEmbeddedAttempt(
         sessionManager,
         settingsManager,
       }));
-      applySystemPromptOverrideToSession(session, systemPromptText);
+      applySystemPromptOverrideToSession(session, systemPromptOverride);
       if (!session) {
         throw new Error("Embedded agent session missing");
       }
@@ -650,8 +646,6 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTargets,
         didSendViaMessagingTool,
         getLastToolError,
-        getUsageTotals,
-        getCompactionCount,
       } = subscription;
 
       const queueHandle: EmbeddedPiQueueHandle = {
@@ -709,13 +703,6 @@ export async function runEmbeddedAttempt(
 
       // Get hook runner once for both before_agent_start and agent_end hooks
       const hookRunner = getGlobalHookRunner();
-      const hookAgentId =
-        typeof params.agentId === "string" && params.agentId.trim()
-          ? normalizeAgentId(params.agentId)
-          : resolveSessionAgentIds({
-              sessionKey: params.sessionKey,
-              config: params.config,
-            }).sessionAgentId;
 
       let promptError: unknown = null;
       try {
@@ -725,16 +712,37 @@ export async function runEmbeddedAttempt(
         let effectivePrompt = params.prompt;
         if (hookRunner?.hasHooks("before_agent_start")) {
           try {
+            const hookTools =
+              tools.length > 0
+                ? tools.map((tool) => ({
+                    name: tool.name || "tool",
+                    description: tool.description ?? "",
+                    parameters:
+                      tool.parameters && typeof tool.parameters === "object"
+                        ? (tool.parameters as Record<string, unknown>)
+                        : undefined,
+                  }))
+                : undefined;
             const hookResult = await hookRunner.runBeforeAgentStart(
               {
                 prompt: params.prompt,
                 messages: activeSession.messages,
+                tools: hookTools,
               },
               {
-                agentId: hookAgentId,
+                agentId: sessionAgentId,
                 sessionKey: params.sessionKey,
                 workspaceDir: params.workspaceDir,
                 messageProvider: params.messageProvider ?? undefined,
+                messageChannel: runtimeChannel ?? undefined,
+                accountId: params.agentAccountId,
+                senderId: params.senderId ?? undefined,
+                senderName: params.senderName ?? undefined,
+                senderUsername: params.senderUsername ?? undefined,
+                senderE164: params.senderE164 ?? undefined,
+                runId: params.runId,
+                model: params.model,
+                modelRegistry: params.modelRegistry,
               },
             );
             if (hookResult?.prependContext) {
@@ -861,10 +869,19 @@ export async function runEmbeddedAttempt(
                 durationMs: Date.now() - promptStartedAt,
               },
               {
-                agentId: hookAgentId,
+                agentId: sessionAgentId,
                 sessionKey: params.sessionKey,
                 workspaceDir: params.workspaceDir,
                 messageProvider: params.messageProvider ?? undefined,
+                messageChannel: runtimeChannel ?? undefined,
+                accountId: params.agentAccountId,
+                senderId: params.senderId ?? undefined,
+                senderName: params.senderName ?? undefined,
+                senderUsername: params.senderUsername ?? undefined,
+                senderE164: params.senderE164 ?? undefined,
+                runId: params.runId,
+                model: params.model,
+                modelRegistry: params.modelRegistry,
               },
             )
             .catch((err) => {
@@ -910,8 +927,6 @@ export async function runEmbeddedAttempt(
         cloudCodeAssistFormatError: Boolean(
           lastAssistant?.errorMessage && isCloudCodeAssistFormatError(lastAssistant.errorMessage),
         ),
-        attemptUsage: getUsageTotals(),
-        compactionCount: getCompactionCount(),
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
       };

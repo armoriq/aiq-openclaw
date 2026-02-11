@@ -10,6 +10,9 @@
     ".": "./index.js",
     "./cli-entry": "./bin/moltbot.js"
   },
+  "scripts": {
+    "postinstall": "node ./scripts/postinstall.js"
+  },
   "dependencies": {
     "openclaw": "workspace:*"
   }

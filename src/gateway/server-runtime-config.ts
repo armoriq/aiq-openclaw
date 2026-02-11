@@ -20,7 +20,6 @@ export type GatewayRuntimeConfig = {
   openResponsesEnabled: boolean;
   openResponsesConfig?: import("../config/types.gateway.js").GatewayHttpResponsesConfig;
   controlUiBasePath: string;
-  controlUiRoot?: string;
   resolvedAuth: ResolvedGatewayAuth;
   authMode: ResolvedGatewayAuth["mode"];
   tailscaleConfig: GatewayTailscaleConfig;
@@ -52,11 +51,6 @@ export async function resolveGatewayRuntimeConfig(params: {
   const openResponsesConfig = params.cfg.gateway?.http?.endpoints?.responses;
   const openResponsesEnabled = params.openResponsesEnabled ?? openResponsesConfig?.enabled ?? false;
   const controlUiBasePath = normalizeControlUiBasePath(params.cfg.gateway?.controlUi?.basePath);
-  const controlUiRootRaw = params.cfg.gateway?.controlUi?.root;
-  const controlUiRoot =
-    typeof controlUiRootRaw === "string" && controlUiRootRaw.trim().length > 0
-      ? controlUiRootRaw.trim()
-      : undefined;
   const authBase = params.cfg.gateway?.auth ?? {};
   const authOverrides = params.auth ?? {};
   const authConfig = {
@@ -109,7 +103,6 @@ export async function resolveGatewayRuntimeConfig(params: {
       ? { ...openResponsesConfig, enabled: openResponsesEnabled }
       : undefined,
     controlUiBasePath,
-    controlUiRoot,
     resolvedAuth,
     authMode,
     tailscaleConfig,

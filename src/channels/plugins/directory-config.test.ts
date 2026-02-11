@@ -22,7 +22,6 @@ describe("directory (config-backed)", () => {
           channels: { C111: { users: ["U777"] } },
         },
       },
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const peers = await listSlackDirectoryPeersFromConfig({
@@ -66,7 +65,6 @@ describe("directory (config-backed)", () => {
           },
         },
       },
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const peers = await listDiscordDirectoryPeersFromConfig({
@@ -96,7 +94,6 @@ describe("directory (config-backed)", () => {
           groups: { "-1001": {}, "*": {} },
         },
       },
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const peers = await listTelegramDirectoryPeersFromConfig({
@@ -124,7 +121,6 @@ describe("directory (config-backed)", () => {
           groups: { "999@g.us": { requireMention: true }, "*": {} },
         },
       },
-      // oxlint-disable-next-line typescript/no-explicit-any
     } as any;
 
     const peers = await listWhatsAppDirectoryPeersFromConfig({

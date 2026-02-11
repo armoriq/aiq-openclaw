@@ -15,7 +15,6 @@ import {
   type SkillInstallSpec,
   type SkillsInstallPreferences,
 } from "./skills.js";
-import { resolveBundledSkillsContext } from "./skills/bundled-context.js";
 
 export type SkillStatusConfigCheck = {
   path: string;
@@ -34,7 +33,6 @@ export type SkillStatusEntry = {
   name: string;
   description: string;
   source: string;
-  bundled: boolean;
   filePath: string;
   baseDir: string;
   skillKey: string;
@@ -169,7 +167,6 @@ function buildSkillStatus(
   config?: OpenClawConfig,
   prefs?: SkillsInstallPreferences,
   eligibility?: SkillEligibilityContext,
-  bundledNames?: Set<string>,
 ): SkillStatusEntry {
   const skillKey = resolveSkillKey(entry);
   const skillConfig = resolveSkillConfig(config, skillKey);
@@ -184,10 +181,6 @@ function buildSkillStatus(
     entry.frontmatter.website ??
     entry.frontmatter.url;
   const homepage = homepageRaw?.trim() ? homepageRaw.trim() : undefined;
-  const bundled =
-    bundledNames && bundledNames.size > 0
-      ? bundledNames.has(entry.skill.name)
-      : entry.skill.source === "openclaw-bundled";
 
   const requiredBins = entry.metadata?.requires?.bins ?? [];
   const requiredAnyBins = entry.metadata?.requires?.anyBins ?? [];
@@ -263,7 +256,6 @@ function buildSkillStatus(
     name: entry.skill.name,
     description: entry.skill.description,
     source: entry.skill.source,
-    bundled,
     filePath: entry.skill.filePath,
     baseDir: entry.skill.baseDir,
     skillKey,
@@ -297,20 +289,13 @@ export function buildWorkspaceSkillStatus(
   },
 ): SkillStatusReport {
   const managedSkillsDir = opts?.managedSkillsDir ?? path.join(CONFIG_DIR, "skills");
-  const bundledContext = resolveBundledSkillsContext();
-  const skillEntries =
-    opts?.entries ??
-    loadWorkspaceSkillEntries(workspaceDir, {
-      config: opts?.config,
-      managedSkillsDir,
-      bundledSkillsDir: bundledContext.dir,
-    });
+  const skillEntries = opts?.entries ?? loadWorkspaceSkillEntries(workspaceDir, opts);
   const prefs = resolveSkillsInstallPreferences(opts?.config);
   return {
     workspaceDir,
     managedSkillsDir,
     skills: skillEntries.map((entry) =>
-      buildSkillStatus(entry, opts?.config, prefs, opts?.eligibility, bundledContext.names),
+      buildSkillStatus(entry, opts?.config, prefs, opts?.eligibility),
     ),
   };
 }

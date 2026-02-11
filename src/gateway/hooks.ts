@@ -43,13 +43,18 @@ export function resolveHooksConfig(cfg: OpenClawConfig): HooksConfigResolved | n
   };
 }
 
-export function extractHookToken(req: IncomingMessage): string | undefined {
+export type HookTokenResult = {
+  token: string | undefined;
+  fromQuery: boolean;
+};
+
+export function extractHookToken(req: IncomingMessage, url: URL): HookTokenResult {
   const auth =
     typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
   if (auth.toLowerCase().startsWith("bearer ")) {
     const token = auth.slice(7).trim();
     if (token) {
-      return token;
+      return { token, fromQuery: false };
     }
   }
   const headerToken =
@@ -57,9 +62,13 @@ export function extractHookToken(req: IncomingMessage): string | undefined {
       ? req.headers["x-openclaw-token"].trim()
       : "";
   if (headerToken) {
-    return headerToken;
+    return { token: headerToken, fromQuery: false };
   }
-  return undefined;
+  const queryToken = url.searchParams.get("token");
+  if (queryToken) {
+    return { token: queryToken.trim(), fromQuery: true };
+  }
+  return { token: undefined, fromQuery: false };
 }
 
 export async function readJsonBody(

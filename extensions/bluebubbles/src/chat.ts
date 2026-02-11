@@ -1,6 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import crypto from "node:crypto";
-import path from "node:path";
 import { resolveBlueBubblesAccount } from "./accounts.js";
 import { blueBubblesFetchWithTimeout, buildBlueBubblesApiUrl } from "./types.js";
 
@@ -337,13 +336,10 @@ export async function setGroupIconBlueBubbles(
   const parts: Uint8Array[] = [];
   const encoder = new TextEncoder();
 
-  // Sanitize filename to prevent multipart header injection (CWE-93)
-  const safeFilename = path.basename(filename).replace(/[\r\n"\\]/g, "_") || "icon.png";
-
   // Add file field named "icon" as per API spec
   parts.push(encoder.encode(`--${boundary}\r\n`));
   parts.push(
-    encoder.encode(`Content-Disposition: form-data; name="icon"; filename="${safeFilename}"\r\n`),
+    encoder.encode(`Content-Disposition: form-data; name="icon"; filename="${filename}"\r\n`),
   );
   parts.push(
     encoder.encode(`Content-Type: ${opts.contentType ?? "application/octet-stream"}\r\n\r\n`),

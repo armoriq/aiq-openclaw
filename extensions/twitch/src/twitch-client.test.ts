@@ -21,12 +21,10 @@ const mockQuit = vi.fn();
 const mockUnbind = vi.fn();
 
 // Event handler storage for testing
-// oxlint-disable-next-line typescript/no-explicit-any
 const messageHandlers: Array<(channel: string, user: string, message: string, msg: any) => void> =
   [];
 
 // Mock functions that track handlers and return unbind objects
-// oxlint-disable-next-line typescript/no-explicit-any
 const mockOnMessage = vi.fn((handler: any) => {
   messageHandlers.push(handler);
   return { unbind: mockUnbind };
@@ -271,7 +269,6 @@ describe("TwitchClientManager", () => {
 
       // Check the stored handler is handler2
       const key = manager.getAccountKey(testAccount);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).messageHandlers.get(key)).toBe(handler2);
     });
   });
@@ -293,9 +290,7 @@ describe("TwitchClientManager", () => {
       await manager.disconnect(testAccount);
 
       const key = manager.getAccountKey(testAccount);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).clients.has(key)).toBe(false);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).messageHandlers.has(key)).toBe(false);
     });
 
@@ -314,7 +309,6 @@ describe("TwitchClientManager", () => {
       expect(mockQuit).toHaveBeenCalledTimes(1);
 
       const key2 = manager.getAccountKey(testAccount2);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).clients.has(key2)).toBe(true);
     });
   });
@@ -327,9 +321,7 @@ describe("TwitchClientManager", () => {
       await manager.disconnectAll();
 
       expect(mockQuit).toHaveBeenCalledTimes(2);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).clients.size).toBe(0);
-      // oxlint-disable-next-line typescript/no-explicit-any
       expect((manager as any).messageHandlers.size).toBe(0);
     });
 
@@ -395,7 +387,6 @@ describe("TwitchClientManager", () => {
 
     it("should create client if not already connected", async () => {
       // Clear the existing client
-      // oxlint-disable-next-line typescript/no-explicit-any
       (manager as any).clients.clear();
 
       // Reset connect call count for this specific test

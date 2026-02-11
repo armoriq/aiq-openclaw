@@ -165,12 +165,7 @@ describe("openclaw-tools: subagents", () => {
       if (request.method === "agent.wait") {
         const params = request.params as { runId?: string; timeoutMs?: number } | undefined;
         waitCalls.push(params ?? {});
-        return {
-          runId: params?.runId ?? "run-1",
-          status: "ok",
-          startedAt: 1000,
-          endedAt: 2000,
-        };
+        return { runId: params?.runId ?? "run-1", status: "ok", startedAt: 1000, endedAt: 2000 };
       }
       if (request.method === "sessions.delete") {
         const params = request.params as { key?: string } | undefined;
@@ -201,22 +196,19 @@ describe("openclaw-tools: subagents", () => {
     if (!childRunId) {
       throw new Error("missing child runId");
     }
-    vi.useFakeTimers();
-    try {
-      emitAgentEvent({
-        runId: childRunId,
-        stream: "lifecycle",
-        data: {
-          phase: "end",
-          startedAt: 1234,
-          endedAt: 2345,
-        },
-      });
+    emitAgentEvent({
+      runId: childRunId,
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 1234,
+        endedAt: 2345,
+      },
+    });
 
-      await vi.runAllTimersAsync();
-    } finally {
-      vi.useRealTimers();
-    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const childWait = waitCalls.find((call) => call.runId === childRunId);
     expect(childWait?.timeoutMs).toBe(1000);
@@ -247,7 +239,7 @@ describe("openclaw-tools: subagents", () => {
       | undefined;
     expect(second?.sessionKey).toBe("discord:group:req");
     expect(second?.deliver).toBe(true);
-    expect(second?.message).toContain("subagent task");
+    expect(second?.message).toContain("background task");
 
     const sendCalls = calls.filter((c) => c.method === "send");
     expect(sendCalls.length).toBe(0);
@@ -280,12 +272,7 @@ describe("openclaw-tools: subagents", () => {
       }
       if (request.method === "agent.wait") {
         const params = request.params as { runId?: string; timeoutMs?: number } | undefined;
-        return {
-          runId: params?.runId ?? "run-1",
-          status: "ok",
-          startedAt: 1000,
-          endedAt: 2000,
-        };
+        return { runId: params?.runId ?? "run-1", status: "ok", startedAt: 1000, endedAt: 2000 };
       }
       if (request.method === "sessions.delete" || request.method === "sessions.patch") {
         return { ok: true };
@@ -315,22 +302,19 @@ describe("openclaw-tools: subagents", () => {
     if (!childRunId) {
       throw new Error("missing child runId");
     }
-    vi.useFakeTimers();
-    try {
-      emitAgentEvent({
-        runId: childRunId,
-        stream: "lifecycle",
-        data: {
-          phase: "end",
-          startedAt: 1000,
-          endedAt: 2000,
-        },
-      });
+    emitAgentEvent({
+      runId: childRunId,
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 1000,
+        endedAt: 2000,
+      },
+    });
 
-      await vi.runAllTimersAsync();
-    } finally {
-      vi.useRealTimers();
-    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const agentCalls = calls.filter((call) => call.method === "agent");
     expect(agentCalls).toHaveLength(2);

@@ -1,14 +1,14 @@
-import type { TUI } from "@mariozechner/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import type { ChatLog } from "./components/chat-log.js";
 import type { AgentEvent, ChatEvent, TuiStateAccess } from "./tui-types.js";
 import { createEventHandlers } from "./tui-event-handlers.js";
 
-type MockChatLog = Pick<
-  ChatLog,
-  "startTool" | "updateToolResult" | "addSystem" | "updateAssistant" | "finalizeAssistant"
->;
-type MockTui = Pick<TUI, "requestRender">;
+type MockChatLog = {
+  startTool: ReturnType<typeof vi.fn>;
+  updateToolResult: ReturnType<typeof vi.fn>;
+  addSystem: ReturnType<typeof vi.fn>;
+  updateAssistant: ReturnType<typeof vi.fn>;
+  finalizeAssistant: ReturnType<typeof vi.fn>;
+};
 
 describe("tui-event-handlers: handleAgentEvent", () => {
   const makeState = (overrides?: Partial<TuiStateAccess>): TuiStateAccess => ({
@@ -21,7 +21,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     currentSessionId: "session-1",
     activeChatRunId: "run-1",
     historyLoaded: true,
-    sessionInfo: { verboseLevel: "on" },
+    sessionInfo: {},
     initialSessionApplied: true,
     isConnected: true,
     autoMessageSent: false,
@@ -42,40 +42,19 @@ describe("tui-event-handlers: handleAgentEvent", () => {
       updateAssistant: vi.fn(),
       finalizeAssistant: vi.fn(),
     };
-    const tui: MockTui = { requestRender: vi.fn() };
+    const tui = { requestRender: vi.fn() };
     const setActivityStatus = vi.fn();
-    const loadHistory = vi.fn();
-    const localRunIds = new Set<string>();
-    const noteLocalRunId = (runId: string) => {
-      localRunIds.add(runId);
-    };
-    const forgetLocalRunId = (runId: string) => {
-      localRunIds.delete(runId);
-    };
-    const isLocalRunId = (runId: string) => localRunIds.has(runId);
-    const clearLocalRunIds = () => {
-      localRunIds.clear();
-    };
 
-    return {
-      chatLog,
-      tui,
-      state,
-      setActivityStatus,
-      loadHistory,
-      noteLocalRunId,
-      forgetLocalRunId,
-      isLocalRunId,
-      clearLocalRunIds,
-    };
+    return { chatLog, tui, state, setActivityStatus };
   };
 
   it("processes tool events when runId matches activeChatRunId (even if sessionId differs)", () => {
     const state = makeState({ currentSessionId: "session-xyz", activeChatRunId: "run-123" });
     const { chatLog, tui, setActivityStatus } = makeContext(state);
     const { handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
+      // Casts are fine here: TUI runtime shape is larger than we need in unit tests.
+      chatLog: chatLog as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -101,8 +80,8 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     const state = makeState({ activeChatRunId: "run-1" });
     const { chatLog, tui, setActivityStatus } = makeContext(state);
     const { handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
+      chatLog: chatLog as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -124,14 +103,8 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     const state = makeState({ activeChatRunId: "run-9" });
     const { tui, setActivityStatus } = makeContext(state);
     const { handleAgentEvent } = createEventHandlers({
-      chatLog: {
-        startTool: vi.fn(),
-        updateToolResult: vi.fn(),
-        addSystem: vi.fn(),
-        updateAssistant: vi.fn(),
-        finalizeAssistant: vi.fn(),
-      },
-      tui,
+      chatLog: { startTool: vi.fn(), updateToolResult: vi.fn() } as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -152,8 +125,8 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     const state = makeState({ activeChatRunId: null });
     const { chatLog, tui, setActivityStatus } = makeContext(state);
     const { handleChatEvent, handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
+      chatLog: chatLog as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -184,8 +157,8 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     const state = makeState({ activeChatRunId: null });
     const { chatLog, tui, setActivityStatus } = makeContext(state);
     const { handleChatEvent, handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
+      chatLog: chatLog as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -211,39 +184,12 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(tui.requestRender).not.toHaveBeenCalled();
   });
 
-  it("accepts tool events after chat final for the same run", () => {
-    const state = makeState({ activeChatRunId: null });
-    const { chatLog, tui, setActivityStatus } = makeContext(state);
-    const { handleChatEvent, handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
-      state,
-      setActivityStatus,
-    });
-
-    handleChatEvent({
-      runId: "run-final",
-      sessionKey: state.currentSessionKey,
-      state: "final",
-      message: { content: [{ type: "text", text: "done" }] },
-    });
-
-    handleAgentEvent({
-      runId: "run-final",
-      stream: "tool",
-      data: { phase: "start", toolCallId: "tc-final", name: "session_status" },
-    });
-
-    expect(chatLog.startTool).toHaveBeenCalledWith("tc-final", "session_status", undefined);
-    expect(tui.requestRender).toHaveBeenCalled();
-  });
-
   it("ignores lifecycle updates for non-active runs in the same session", () => {
     const state = makeState({ activeChatRunId: "run-active" });
     const { chatLog, tui, setActivityStatus } = makeContext(state);
     const { handleChatEvent, handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
+      chatLog: chatLog as any,
+      tui: tui as any,
       state,
       setActivityStatus,
     });
@@ -265,96 +211,5 @@ describe("tui-event-handlers: handleAgentEvent", () => {
 
     expect(setActivityStatus).not.toHaveBeenCalled();
     expect(tui.requestRender).not.toHaveBeenCalled();
-  });
-
-  it("suppresses tool events when verbose is off", () => {
-    const state = makeState({
-      activeChatRunId: "run-123",
-      sessionInfo: { verboseLevel: "off" },
-    });
-    const { chatLog, tui, setActivityStatus } = makeContext(state);
-    const { handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
-      state,
-      setActivityStatus,
-    });
-
-    handleAgentEvent({
-      runId: "run-123",
-      stream: "tool",
-      data: { phase: "start", toolCallId: "tc-off", name: "session_status" },
-    });
-
-    expect(chatLog.startTool).not.toHaveBeenCalled();
-    expect(tui.requestRender).not.toHaveBeenCalled();
-  });
-
-  it("omits tool output when verbose is on (non-full)", () => {
-    const state = makeState({
-      activeChatRunId: "run-123",
-      sessionInfo: { verboseLevel: "on" },
-    });
-    const { chatLog, tui, setActivityStatus } = makeContext(state);
-    const { handleAgentEvent } = createEventHandlers({
-      chatLog,
-      tui,
-      state,
-      setActivityStatus,
-    });
-
-    handleAgentEvent({
-      runId: "run-123",
-      stream: "tool",
-      data: {
-        phase: "update",
-        toolCallId: "tc-on",
-        name: "session_status",
-        partialResult: { content: [{ type: "text", text: "secret" }] },
-      },
-    });
-
-    handleAgentEvent({
-      runId: "run-123",
-      stream: "tool",
-      data: {
-        phase: "result",
-        toolCallId: "tc-on",
-        name: "session_status",
-        result: { content: [{ type: "text", text: "secret" }] },
-        isError: false,
-      },
-    });
-
-    expect(chatLog.updateToolResult).toHaveBeenCalledTimes(1);
-    expect(chatLog.updateToolResult).toHaveBeenCalledWith(
-      "tc-on",
-      { content: [] },
-      { isError: false },
-    );
-  });
-
-  it("refreshes history after a non-local chat final", () => {
-    const state = makeState({ activeChatRunId: null });
-    const { chatLog, tui, setActivityStatus, loadHistory, isLocalRunId, forgetLocalRunId } =
-      makeContext(state);
-    const { handleChatEvent } = createEventHandlers({
-      chatLog,
-      tui,
-      state,
-      setActivityStatus,
-      loadHistory,
-      isLocalRunId,
-      forgetLocalRunId,
-    });
-
-    handleChatEvent({
-      runId: "external-run",
-      sessionKey: state.currentSessionKey,
-      state: "final",
-      message: { content: [{ type: "text", text: "done" }] },
-    });
-
-    expect(loadHistory).toHaveBeenCalledTimes(1);
   });
 });

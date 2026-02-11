@@ -23,52 +23,24 @@ metadata:
   }
 ---
 
-# imsg Actions
-
-## Overview
+# imsg
 
 Use `imsg` to read and send Messages.app iMessage/SMS on macOS.
 
-Requirements: Messages.app signed in, Full Disk Access for your terminal, and Automation permission to control Messages.app for sending.
+Requirements
 
-## Inputs to collect
+- Messages.app signed in
+- Full Disk Access for your terminal
+- Automation permission to control Messages.app (for sending)
 
-- Recipient handle (phone/email) for `send`
-- `chatId` for history/watch (from `imsg chats --limit 10 --json`)
-- `text` and optional `file` path for sends
+Common commands
 
-## Actions
+- List chats: `imsg chats --limit 10 --json`
+- History: `imsg history --chat-id 1 --limit 20 --attachments --json`
+- Watch: `imsg watch --chat-id 1 --attachments`
+- Send: `imsg send --to "+14155551212" --text "hi" --file /path/pic.jpg`
 
-### List chats
-
-```bash
-imsg chats --limit 10 --json
-```
-
-### Fetch chat history
-
-```bash
-imsg history --chat-id 1 --limit 20 --attachments --json
-```
-
-### Watch a chat
-
-```bash
-imsg watch --chat-id 1 --attachments
-```
-
-### Send a message
-
-```bash
-imsg send --to "+14155551212" --text "hi" --file /path/pic.jpg
-```
-
-## Notes
+Notes
 
 - `--service imessage|sms|auto` controls delivery.
 - Confirm recipient + message before sending.
-
-## Ideas to try
-
-- Use `imsg chats --limit 10 --json` to discover chat ids.
-- Watch a high-signal chat to stream incoming messages.
