@@ -441,9 +441,7 @@ describe("ArmorIQ plugin", () => {
 
     const intentToken = {
       plan: {
-        steps: [
-          { action: "send_email", params: { to: "user@example.com" }, mcp: "openclaw" },
-        ],
+        steps: [{ action: "send_email", params: { to: "user@example.com" }, mcp: "openclaw" }],
         metadata: { goal: "Send email" },
       },
       expiresAt: Date.now() / 1000 + 300,
@@ -564,7 +562,7 @@ describe("ArmorIQ plugin", () => {
     };
 
     log("=== Testing One Intent Token Per Run ===");
-    
+
     let tokenCreationCount = 0;
     completeSimpleMock.mockImplementation(async () => {
       tokenCreationCount++;
@@ -587,21 +585,22 @@ describe("ArmorIQ plugin", () => {
       return {
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({
-          allowed: true,
-          reason: "Step verified",
-          verification_source: "iap",
-          step: { step_index: 0, action: body.tool_name, params: {} },
-          execution_state: {
-            plan_id: "plan-123",
-            intent_reference: "plan-123",
-            executed_steps: [],
-            current_step: 1,
-            total_steps: 3,
-            status: "in_progress",
-            is_completed: false,
-          },
-        }),
+        text: async () =>
+          JSON.stringify({
+            allowed: true,
+            reason: "Step verified",
+            verification_source: "iap",
+            step: { step_index: 0, action: body.tool_name, params: {} },
+            execution_state: {
+              plan_id: "plan-123",
+              intent_reference: "plan-123",
+              executed_steps: [],
+              current_step: 1,
+              total_steps: 3,
+              status: "in_progress",
+              is_completed: false,
+            },
+          }),
       };
     });
 
@@ -664,7 +663,7 @@ describe("ArmorIQ plugin", () => {
     log(`IAP verify-step calls: ${fetchMock.mock.calls.length}`);
     log(`Explanation: Cached plan allows local validation without IAP calls`);
     log(`\n✅ ONE intent token shared across 3 tool calls!`);
-    
+
     expect(tokenCreationCount).toBe(1);
     log(`\nFlow: Token created once during agent_start, then reused for all tool calls`);
 
@@ -689,7 +688,7 @@ describe("ArmorIQ plugin", () => {
       iapCallCount++;
       const body = JSON.parse(options?.body || "{}");
       const toolName = body.tool_name || "unknown";
-      
+
       log(`\n[IAP Call #${iapCallCount}] POST ${url}`);
       log(`  Tool: ${toolName}`);
       log(`  Token present: ${body.token ? "YES" : "NO"}`);
@@ -703,10 +702,10 @@ describe("ArmorIQ plugin", () => {
             allowed: true,
             reason: `Step ${iapCallCount} verified successfully`,
             verification_source: "iap",
-            step: { 
-              step_index: iapCallCount - 1, 
-              action: toolName, 
-              params: {} 
+            step: {
+              step_index: iapCallCount - 1,
+              action: toolName,
+              params: {},
             },
             execution_state: {
               plan_id: "plan-xyz-789",
@@ -741,9 +740,9 @@ describe("ArmorIQ plugin", () => {
           { action: "read_file", params: { path: "/data/report.txt" }, mcp: "openclaw" },
           { action: "write_file", params: { path: "/output/summary.txt" }, mcp: "openclaw" },
         ],
-        metadata: { 
+        metadata: {
           goal: "Process report and send email",
-          plan_id: "plan-xyz-789" 
+          plan_id: "plan-xyz-789",
         },
       },
       expiresAt: Date.now() / 1000 + 600,
@@ -765,12 +764,12 @@ describe("ArmorIQ plugin", () => {
       ...createCtx(stableRunId),
       intentTokenRaw,
     };
-    
+
     const result1 = await beforeToolCall?.(
       { toolName: "send_email", params: { to: "alice@example.com" } },
       ctx1,
     );
-    
+
     log(`[Plugin Decision] ${result1?.block ? `BLOCKED: ${result1.blockReason}` : "ALLOWED"}`);
     expect(result1?.block).not.toBe(true);
 
@@ -779,12 +778,12 @@ describe("ArmorIQ plugin", () => {
       ...createCtx(stableRunId),
       intentTokenRaw,
     };
-    
+
     const result2 = await beforeToolCall?.(
       { toolName: "read_file", params: { path: "/data/report.txt" } },
       ctx2,
     );
-    
+
     log(`[Plugin Decision] ${result2?.block ? `BLOCKED: ${result2.blockReason}` : "ALLOWED"}`);
     expect(result2?.block).not.toBe(true);
 
@@ -793,12 +792,12 @@ describe("ArmorIQ plugin", () => {
       ...createCtx(stableRunId),
       intentTokenRaw,
     };
-    
+
     const result3 = await beforeToolCall?.(
       { toolName: "write_file", params: { path: "/output/summary.txt" } },
       ctx3,
     );
-    
+
     log(`[Plugin Decision] ${result3?.block ? `BLOCKED: ${result3.blockReason}` : "ALLOWED"}`);
     expect(result3?.block).not.toBe(true);
 
@@ -806,7 +805,7 @@ describe("ArmorIQ plugin", () => {
     log(`Total IAP verification calls: ${iapCallCount}`);
     log(`All tools allowed: YES`);
     log(`Same intent token used: YES (passed via context)`);
-    
+
     expect(iapCallCount).toBe(3);
 
     log("\n=== Flow Summary ===");
@@ -850,7 +849,9 @@ describe("ArmorIQ plugin", () => {
       log(`  📍 Path: ${body.path || "N/A"}`);
       log(`  🔢 Step Index: ${body.step_index ?? "N/A"}`);
       log(`  🌲 Merkle Proof: ${hasProof ? `YES (${body.proof.length} siblings)` : "NO"}`);
-      log(`  🔐 Value Digest: ${hasValueDigest ? body.context.csrg_value_digest.substring(0, 16) + "..." : "NO"}`);
+      log(
+        `  🔐 Value Digest: ${hasValueDigest ? body.context.csrg_value_digest.substring(0, 16) + "..." : "NO"}`,
+      );
 
       if (hasProof) {
         log(`  📝 Proof Details:`);
@@ -861,7 +862,7 @@ describe("ArmorIQ plugin", () => {
 
       const result = {
         allowed: true,
-        reason: hasProof 
+        reason: hasProof
           ? `CSRG cryptographic proof verified + IAP step ${iapCallCount} approved`
           : `IAP step ${iapCallCount} verified (no CSRG proof)`,
         verification_source: hasProof ? "csrg" : "iap",
@@ -892,7 +893,9 @@ describe("ArmorIQ plugin", () => {
       log(`     Verification Source: ${result.verification_source.toUpperCase()}`);
       log(`     Execution Status: ${result.execution_state.status}`);
       log(`     Completed Steps: [${result.execution_state.executed_steps.join(", ")}]`);
-      log(`     Current Step: ${result.execution_state.current_step}/${result.execution_state.total_steps}`);
+      log(
+        `     Current Step: ${result.execution_state.current_step}/${result.execution_state.total_steps}`,
+      );
       if (result.node_hash) {
         log(`     🌲 Merkle Root: ${result.csrg_merkle_root}`);
         log(`     🔗 Node Hash: ${result.node_hash}`);
@@ -998,7 +1001,9 @@ describe("ArmorIQ plugin", () => {
       ctx1,
     );
 
-    log(`\n  🎯 PLUGIN DECISION: ${result1?.block ? `❌ BLOCKED - ${result1.blockReason}` : "✅ ALLOWED"}`);
+    log(
+      `\n  🎯 PLUGIN DECISION: ${result1?.block ? `❌ BLOCKED - ${result1.blockReason}` : "✅ ALLOWED"}`,
+    );
     expect(result1?.block).not.toBe(true);
 
     // TOOL CALL 2
@@ -1022,7 +1027,9 @@ describe("ArmorIQ plugin", () => {
       ctx2,
     );
 
-    log(`\n  🎯 PLUGIN DECISION: ${result2?.block ? `❌ BLOCKED - ${result2.blockReason}` : "✅ ALLOWED"}`);
+    log(
+      `\n  🎯 PLUGIN DECISION: ${result2?.block ? `❌ BLOCKED - ${result2.blockReason}` : "✅ ALLOWED"}`,
+    );
     expect(result2?.block).not.toBe(true);
 
     // TOOL CALL 3
@@ -1046,7 +1053,9 @@ describe("ArmorIQ plugin", () => {
       ctx3,
     );
 
-    log(`\n  🎯 PLUGIN DECISION: ${result3?.block ? `❌ BLOCKED - ${result3.blockReason}` : "✅ ALLOWED"}`);
+    log(
+      `\n  🎯 PLUGIN DECISION: ${result3?.block ? `❌ BLOCKED - ${result3.blockReason}` : "✅ ALLOWED"}`,
+    );
     expect(result3?.block).not.toBe(true);
 
     // SUMMARY
@@ -1207,9 +1216,216 @@ describe("ArmorIQ plugin", () => {
     expect(callBody.proof).toEqual([{ position: "left", sibling_hash: "hash_charlie" }]);
   });
 
-  it("DUPLICATE TOOLS: blocks when same tool appears multiple times without distinguishing params", async () => {
+  it("DUPLICATE TOOLS: resolves proofs with step_path + step_index fields", async () => {
     process.env.REQUIRE_CSRG_PROOFS = "true";
     process.env.CSRG_VERIFY_ENABLED = "true";
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          reason: "Step verified",
+          verification_source: "csrg",
+          step: { step_index: 2, action: "send_email", params: {} },
+          execution_state: {
+            plan_id: "plan-step-path",
+            intent_reference: "plan-step-path",
+            executed_steps: [0, 1],
+            current_step: 3,
+            total_steps: 3,
+            status: "in_progress",
+            is_completed: false,
+          },
+        }),
+    });
+
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-step-path",
+      agentId: "agent-step-path",
+      backendEndpoint: "https://customer-iap.armoriq.ai",
+    });
+    register(api as any);
+
+    const intentToken = {
+      plan: {
+        steps: [
+          {
+            action: "send_email",
+            params: { to: "alice@example.com" },
+            mcp: "openclaw",
+          },
+          {
+            action: "send_email",
+            params: { to: "bob@example.com" },
+            mcp: "openclaw",
+          },
+          {
+            action: "send_email",
+            params: { to: "charlie@example.com" },
+            mcp: "openclaw",
+          },
+        ],
+        metadata: { goal: "Send multiple emails" },
+      },
+      expiresAt: Date.now() / 1000 + 3600,
+      step_proofs: [
+        {
+          step_index: 0,
+          step_path: "/steps/[0]/tool",
+          proof: [{ position: "left", sibling_hash: "hash_alice" }],
+          value_digest: "digest_alice",
+        },
+        {
+          step_index: 1,
+          step_path: "/steps/[1]/tool",
+          proof: [{ position: "right", sibling_hash: "hash_bob" }],
+          value_digest: "digest_bob",
+        },
+        {
+          step_index: 2,
+          step_path: "/steps/[2]/tool",
+          proof: [{ position: "left", sibling_hash: "hash_charlie" }],
+          value_digest: "digest_charlie",
+        },
+      ],
+    };
+
+    const ctx = {
+      ...createCtx("duplicate-step-path-run"),
+      intentTokenRaw: JSON.stringify(intentToken),
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.(
+      { toolName: "send_email", params: { to: "charlie@example.com" } },
+      ctx,
+    );
+
+    expect(result?.block).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const callBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body || "{}");
+    expect(callBody.path).toBe("/steps/[2]/tool");
+    expect(callBody.step_index).toBe(2);
+  });
+
+  it("DUPLICATE TOOLS: matches step.params when metadata.inputs is missing", async () => {
+    process.env.REQUIRE_CSRG_PROOFS = "true";
+    process.env.CSRG_VERIFY_ENABLED = "true";
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          reason: "Step verified",
+          verification_source: "csrg",
+          step: { step_index: 1, action: "exec", params: {} },
+          execution_state: {
+            plan_id: "plan-step-params",
+            intent_reference: "plan-step-params",
+            executed_steps: [0],
+            current_step: 2,
+            total_steps: 2,
+            status: "in_progress",
+            is_completed: false,
+          },
+        }),
+    });
+
+    const { api, handlers } = createApi({
+      enabled: true,
+      apiKey: "ak_live_test",
+      userId: "user-step-params",
+      agentId: "agent-step-params",
+      backendEndpoint: "https://customer-iap.armoriq.ai",
+    });
+    register(api as any);
+
+    const intentToken = {
+      plan: {
+        steps: [
+          {
+            action: "exec",
+            params: { command: "date" },
+            mcp: "openclaw",
+          },
+          {
+            action: "exec",
+            params: { command: "uname -a" },
+            mcp: "openclaw",
+          },
+        ],
+        metadata: { goal: "Run two exec calls" },
+      },
+      expiresAt: Date.now() / 1000 + 3600,
+      step_proofs: [
+        {
+          step_index: 0,
+          path: "/steps/[0]/action",
+          proof: [{ position: "left", sibling_hash: "hash_date" }],
+          value_digest: "digest_date",
+        },
+        {
+          step_index: 1,
+          path: "/steps/[1]/action",
+          proof: [{ position: "right", sibling_hash: "hash_uname" }],
+          value_digest: "digest_uname",
+        },
+      ],
+    };
+
+    const ctx = {
+      ...createCtx("duplicate-step-params-run"),
+      intentTokenRaw: JSON.stringify(intentToken),
+    };
+
+    const beforeToolCall = handlers.get("before_tool_call")?.[0];
+    const result = await beforeToolCall?.(
+      { toolName: "exec", params: { command: "uname -a" } },
+      ctx,
+    );
+
+    expect(result?.block).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const callBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body || "{}");
+    expect(callBody.path).toBe("/steps/[1]/action");
+    expect(callBody.step_index).toBe(1);
+  });
+
+  it("DUPLICATE TOOLS: advances through repeated identical tools in sequence", async () => {
+    process.env.REQUIRE_CSRG_PROOFS = "true";
+    process.env.CSRG_VERIFY_ENABLED = "true";
+
+    fetchMock.mockImplementation(async (_url: string, options: any) => {
+      const body = JSON.parse(options?.body || "{}");
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            allowed: true,
+            reason: "Step verified",
+            verification_source: "csrg",
+            step: { step_index: body.step_index ?? 0, action: "send_email", params: {} },
+            execution_state: {
+              plan_id: "plan-ambiguous",
+              intent_reference: "plan-ambiguous",
+              executed_steps: [],
+              current_step: body.step_index ?? 0,
+              total_steps: 3,
+              status: "in_progress",
+              is_completed: false,
+            },
+          }),
+      };
+    });
 
     const { api, handlers } = createApi({
       enabled: true,
@@ -1258,11 +1474,24 @@ describe("ArmorIQ plugin", () => {
     };
 
     const beforeToolCall = handlers.get("before_tool_call")?.[0];
-    const result = await beforeToolCall?.({ toolName: "send_email", params: {} }, ctx);
+    const result1 = await beforeToolCall?.({ toolName: "send_email", params: {} }, ctx);
+    const result2 = await beforeToolCall?.({ toolName: "send_email", params: {} }, ctx);
+    const result3 = await beforeToolCall?.({ toolName: "send_email", params: {} }, ctx);
 
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain("CSRG proof headers");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result1?.block).not.toBe(true);
+    expect(result2?.block).not.toBe(true);
+    expect(result3?.block).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const callBody1 = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body || "{}");
+    const callBody2 = JSON.parse(fetchMock.mock.calls[1]?.[1]?.body || "{}");
+    const callBody3 = JSON.parse(fetchMock.mock.calls[2]?.[1]?.body || "{}");
+    expect(callBody1.path).toBe("/steps/[0]/action");
+    expect(callBody2.path).toBe("/steps/[1]/action");
+    expect(callBody3.path).toBe("/steps/[2]/action");
+    expect(callBody1.step_index).toBe(0);
+    expect(callBody2.step_index).toBe(1);
+    expect(callBody3.step_index).toBe(2);
   });
 
   it("NO CACHED PLAN: blocks when there is no cached plan and no intent token", async () => {

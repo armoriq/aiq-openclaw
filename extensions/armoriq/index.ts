@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
-import { Type } from "@sinclair/typebox";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { ArmorIQClient } from "@armoriq/sdk";
 import { completeSimple } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
+import { createHash } from "node:crypto";
+import { CryptoPolicyService, computePolicyDigest } from "./src/crypto-policy.service.js";
 import { IAPVerificationService, type CsrgProofHeaders } from "./src/iap-verfication.service.js";
 import {
   PolicyStore,
@@ -15,7 +16,6 @@ import {
   type PolicyRule,
   type PolicyDataClass,
 } from "./src/policy.js";
-import { CryptoPolicyService, computePolicyDigest } from "./src/crypto-policy.service.js";
 
 type ArmorIqConfig = {
   enabled: boolean;
@@ -83,9 +83,16 @@ type PlanCacheEntry = {
   tokenPlan?: Record<string, unknown>;
   plan: Record<string, unknown>;
   allowedActions: Set<string>;
+  executedStepIndices: Set<number>;
   createdAt: number;
   expiresAt?: number;
   error?: string;
+};
+
+type ContextTokenExecutionEntry = {
+  tokenHash: string;
+  usedStepIndices: Set<number>;
+  updatedAt: number;
 };
 
 const DEFAULT_VALIDITY_SECONDS = 60;
@@ -117,6 +124,8 @@ Tool access enforcement:
 
 const clientCache = new Map<string, ArmorIQClient>();
 const planCache = new Map<string, PlanCacheEntry>();
+const sessionKeyIndex = new Map<string, string>();
+const contextTokenExecutionCache = new Map<string, ContextTokenExecutionEntry>();
 
 function stringEnum<T extends readonly string[]>(
   values: T,
@@ -438,7 +447,11 @@ function parsePolicyTextCommand(text: string, state: PolicyState): PolicyCommand
   if (/\b(new|create|add)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
     return { kind: "update", update: buildPolicyUpdateFromText(trimmed, state) };
   }
-  if (/\b(help|commands|prompt)\b/.test(lower) && !/\b(new|create|add|update|delete|reset|list)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
+  if (
+    /\b(help|commands|prompt)\b/.test(lower) &&
+    !/\b(new|create|add|update|delete|reset|list)\b/.test(lower) &&
+    /\bpolicy|policies\b/.test(lower)
+  ) {
     return { kind: "help" };
   }
   if (/\b(list|show|view)\b/.test(lower) && /\bpolicy|policies\b/.test(lower)) {
@@ -523,7 +536,10 @@ function resolvePolicyStorePath(api: OpenClawPluginApi, cfg: ArmorIqConfig): str
   return api.resolvePath ? api.resolvePath(rawPath) : rawPath;
 }
 
-function isPolicyUpdateAllowed(cfg: ArmorIqConfig, ctx: ToolContext): {
+function isPolicyUpdateAllowed(
+  cfg: ArmorIqConfig,
+  ctx: ToolContext,
+): {
   allowed: boolean;
   reason?: string;
   candidates?: string[];
@@ -637,7 +653,7 @@ function resolveIdentities(cfg: ArmorIqConfig, ctx: ToolContext): IdentityBundle
 function resolveRunKey(ctx: ToolContext): string | null {
   const runId = ctx.runId?.trim();
   const sessionKey = ctx.sessionKey?.trim();
-  
+
   if (runId) {
     if (sessionKey && sessionKey !== runId) {
       return `${sessionKey}::${runId}`;
@@ -703,6 +719,40 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function parseStepIndex(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function extractStepInputCandidates(step: Record<string, unknown>): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+
+  const metadata = step.metadata;
+  if (isPlainObject(metadata)) {
+    const inputs = metadata.inputs;
+    if (isPlainObject(inputs)) {
+      candidates.push(inputs);
+    }
+  }
+
+  if (isPlainObject(step.params)) {
+    candidates.push(step.params);
+  }
+  if (isPlainObject(step.arguments)) {
+    candidates.push(step.arguments);
+  }
+
+  return candidates;
+}
+
 function isSubsetValue(needle: unknown, haystack: unknown): boolean {
   if (needle === haystack) {
     return true;
@@ -764,12 +814,8 @@ function findPlanStepIndices(
     }
     matches.push(idx);
     if (toolParams) {
-      const metadata = (step as { metadata?: unknown }).metadata;
-      const inputs =
-        metadata && typeof metadata === "object" && !Array.isArray(metadata)
-          ? (metadata as Record<string, unknown>).inputs
-          : undefined;
-      if (inputs && isPlainObject(inputs) && isSubsetValue(inputs, toolParams)) {
+      const inputCandidates = extractStepInputCandidates(step as Record<string, unknown>);
+      if (inputCandidates.some((inputs) => isSubsetValue(inputs, toolParams))) {
         paramMatches.push(idx);
       }
     }
@@ -799,24 +845,31 @@ function readStepProofsFromToken(tokenObj: Record<string, unknown>): unknown[] |
 function resolveStepProofEntry(
   stepProofs: unknown[],
   stepIndex: number,
-): { proof?: unknown; path?: string; valueDigest?: string } | null {
+): { proof?: unknown; path?: string; valueDigest?: string; stepIndex: number } | null {
   const entry = stepProofs[stepIndex];
   if (!entry) {
     return null;
   }
   if (Array.isArray(entry)) {
-    return { proof: entry };
+    return { proof: entry, stepIndex };
   }
   if (typeof entry === "object") {
     const record = entry as Record<string, unknown>;
     const proof = Array.isArray(record.proof) ? record.proof : undefined;
-    const path = readString(record.path) ?? readString(record.csrg_path) ?? undefined;
+    const path =
+      readString(record.path) ??
+      readString(record.step_path) ??
+      readString(record.csrg_path) ??
+      undefined;
+    const indexFromField = parseStepIndex(record.step_index) ?? parseStepIndex(record.stepIndex);
+    const indexFromPath = parseStepIndexFromPath(path);
+    const resolvedStepIndex = indexFromField ?? indexFromPath ?? stepIndex;
     const valueDigest =
       readString(record.value_digest) ??
       readString(record.valueDigest) ??
       readString(record.csrg_value_digest) ??
       undefined;
-    return { proof, path, valueDigest };
+    return { proof, path, valueDigest, stepIndex: resolvedStepIndex };
   }
   return null;
 }
@@ -833,12 +886,92 @@ function parseStepIndexFromPath(path?: string): number | null {
   return Number.isFinite(index) ? index : null;
 }
 
+function getContextTokenUsedStepIndices(
+  runKey: string | null,
+  tokenRaw: string,
+): Set<number> | undefined {
+  if (!runKey) {
+    return undefined;
+  }
+  const tokenHash = sha256Hex(tokenRaw);
+  const cached = contextTokenExecutionCache.get(runKey);
+  if (cached && cached.tokenHash === tokenHash) {
+    cached.updatedAt = Date.now();
+    return cached.usedStepIndices;
+  }
+  const entry: ContextTokenExecutionEntry = {
+    tokenHash,
+    usedStepIndices: new Set<number>(),
+    updatedAt: Date.now(),
+  };
+  contextTokenExecutionCache.set(runKey, entry);
+  return entry.usedStepIndices;
+}
+
+function scoreProofPath(path?: string): number {
+  if (!path) {
+    return 0;
+  }
+  if (/\/(action|tool)$/i.test(path)) {
+    return 3;
+  }
+  if (/\/(arguments|params|metadata)$/i.test(path)) {
+    return 1;
+  }
+  return 2;
+}
+
+function chooseProofEntry(
+  entries: Array<{ stepIndex: number; proof?: unknown; path?: string; valueDigest?: string }>,
+  usedStepIndices?: Set<number>,
+): { stepIndex: number; proof?: unknown; path?: string; valueDigest?: string } | null {
+  if (!entries.length) {
+    return null;
+  }
+  const stepGroups = new Map<
+    number,
+    Array<{ stepIndex: number; proof?: unknown; path?: string; valueDigest?: string }>
+  >();
+  for (const entry of entries) {
+    const list = stepGroups.get(entry.stepIndex) ?? [];
+    list.push(entry);
+    stepGroups.set(entry.stepIndex, list);
+  }
+
+  const orderedStepIndices = Array.from(stepGroups.keys()).sort((a, b) => {
+    const aUsed = usedStepIndices?.has(a) ? 1 : 0;
+    const bUsed = usedStepIndices?.has(b) ? 1 : 0;
+    if (aUsed !== bUsed) {
+      return aUsed - bUsed;
+    }
+    return a - b;
+  });
+  const selectedStepIndex = orderedStepIndices[0];
+  if (selectedStepIndex === undefined) {
+    return null;
+  }
+  const candidates = stepGroups.get(selectedStepIndex) ?? [];
+  candidates.sort((a, b) => {
+    const pathScore = scoreProofPath(b.path) - scoreProofPath(a.path);
+    if (pathScore !== 0) {
+      return pathScore;
+    }
+    const digestScore = Number(Boolean(b.valueDigest)) - Number(Boolean(a.valueDigest));
+    if (digestScore !== 0) {
+      return digestScore;
+    }
+    return 0;
+  });
+  return candidates[0] ?? null;
+}
+
 function resolveCsrgProofsFromToken(params: {
   intentTokenRaw: string;
   plan: Record<string, unknown>;
   toolName: string;
   toolParams: unknown;
-}): CsrgProofHeaders | null {
+  usedStepIndices?: Set<number>;
+}): (CsrgProofHeaders & { stepIndex: number }) | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(params.intentTokenRaw);
@@ -870,33 +1003,35 @@ function resolveCsrgProofsFromToken(params: {
     if (!entry?.proof || !Array.isArray(entry.proof)) {
       continue;
     }
-    const stepIndexFromPath = parseStepIndexFromPath(entry.path);
-    if (stepIndexFromPath === null) {
-      continue;
-    }
-    resolvedEntries.push({ stepIndex: stepIndexFromPath, ...entry });
+    resolvedEntries.push(entry);
   }
 
-  let stepIndex: number | null = null;
-  let entry: { proof?: unknown; path?: string; valueDigest?: string } | null = null;
   const entriesMatchingTool = resolvedEntries.filter((resolved) =>
     matches.includes(resolved.stepIndex),
   );
-  if (entriesMatchingTool.length === 1) {
-    stepIndex = entriesMatchingTool[0].stepIndex;
-    entry = entriesMatchingTool[0];
-  } else if (paramMatches.length === 1) {
-    stepIndex = paramMatches[0];
-    entry = resolveStepProofEntry(stepProofs, stepIndex);
-  } else if (matches.length === 1) {
-    stepIndex = matches[0];
-    entry = resolveStepProofEntry(stepProofs, stepIndex);
-  }
-
-  if (stepIndex === null || !entry?.proof || !Array.isArray(entry.proof)) {
+  if (entriesMatchingTool.length === 0) {
     return null;
   }
-  const path = entry.path ?? `/steps/[${stepIndex}]/action`;
+
+  const entriesMatchingParams =
+    paramMatches.length > 0
+      ? entriesMatchingTool.filter((entry) => paramMatches.includes(entry.stepIndex))
+      : [];
+
+  const selectedEntry = chooseProofEntry(
+    entriesMatchingParams.length > 0 ? entriesMatchingParams : entriesMatchingTool,
+    params.usedStepIndices,
+  );
+  if (
+    !selectedEntry ||
+    typeof selectedEntry.stepIndex !== "number" ||
+    !selectedEntry.proof ||
+    !Array.isArray(selectedEntry.proof)
+  ) {
+    return null;
+  }
+  const stepIndex = selectedEntry.stepIndex;
+  const path = selectedEntry.path ?? `/steps/[${stepIndex}]/action`;
   const stepObj = steps[stepIndex];
   const action =
     typeof (stepObj as { action?: unknown }).action === "string"
@@ -904,8 +1039,8 @@ function resolveCsrgProofsFromToken(params: {
       : typeof (stepObj as { tool?: unknown }).tool === "string"
         ? String((stepObj as { tool?: unknown }).tool)
         : params.toolName;
-  const valueDigest = entry.valueDigest ?? sha256Hex(JSON.stringify(action));
-  return { path, proof: entry.proof, valueDigest };
+  const valueDigest = selectedEntry.valueDigest ?? sha256Hex(JSON.stringify(action));
+  return { path, proof: selectedEntry.proof, valueDigest, stepIndex };
 }
 
 function extractAllowedActions(plan: Record<string, unknown>): Set<string> {
@@ -968,7 +1103,12 @@ function checkIntentTokenPlan(params: {
   intentTokenRaw: string;
   toolName: string;
   toolParams: unknown;
-}): { matched: boolean; blockReason?: string; params?: Record<string, unknown>; plan?: Record<string, unknown> } {
+}): {
+  matched: boolean;
+  blockReason?: string;
+  params?: Record<string, unknown>;
+  plan?: Record<string, unknown>;
+} {
   const parsed = extractPlanFromIntentToken(params.intentTokenRaw);
   if (!parsed) {
     return { matched: false };
@@ -987,7 +1127,9 @@ function checkIntentTokenPlan(params: {
   }
   const step = findPlanStep(parsed.plan, params.toolName);
   if (step) {
-    const toolParams = isPlainObject(params.toolParams) ? (params.toolParams as Record<string, unknown>) : undefined;
+    const toolParams = isPlainObject(params.toolParams)
+      ? (params.toolParams as Record<string, unknown>)
+      : undefined;
     if (toolParams && !isParamsAllowedByPlan(step, toolParams)) {
       return {
         matched: true,
@@ -996,7 +1138,13 @@ function checkIntentTokenPlan(params: {
       };
     }
   }
-  return { matched: true, params: isPlainObject(params.toolParams) ? (params.toolParams as Record<string, unknown>) : undefined, plan: parsed.plan };
+  return {
+    matched: true,
+    params: isPlainObject(params.toolParams)
+      ? (params.toolParams as Record<string, unknown>)
+      : undefined,
+    plan: parsed.plan,
+  };
 }
 
 function buildToolList(tools?: Array<{ name: string; description?: string }>): string {
@@ -1288,7 +1436,13 @@ export default function register(api: OpenClawPluginApi) {
       })
     : null;
 
-  const handleCryptoPolicyUpdate = async (state: { version: number; updatedAt: string; updatedBy?: string; policy: { rules: any[] }; history: any[] }) => {
+  const handleCryptoPolicyUpdate = async (state: {
+    version: number;
+    updatedAt: string;
+    updatedBy?: string;
+    policy: { rules: any[] };
+    history: any[];
+  }) => {
     if (!cryptoPolicyService) return;
     try {
       const identity = {
@@ -1358,9 +1512,9 @@ export default function register(api: OpenClawPluginApi) {
               };
             }
             if (command.kind === "get") {
-              const rule = policyStore.getState().policy.rules.find(
-                (entry) => entry.id === command.id,
-              );
+              const rule = policyStore
+                .getState()
+                .policy.rules.find((entry) => entry.id === command.id);
               return {
                 content: [
                   {
@@ -1540,9 +1694,7 @@ export default function register(api: OpenClawPluginApi) {
               content: [
                 {
                   type: "text",
-                  text: `Policy update failed: ${
-                    err instanceof Error ? err.message : String(err)
-                  }`,
+                  text: `Policy update failed: ${err instanceof Error ? err.message : String(err)}`,
                 },
               ],
               details: { error: err instanceof Error ? err.stack : String(err) },
@@ -1562,6 +1714,9 @@ export default function register(api: OpenClawPluginApi) {
 
   api.on("before_agent_start", async (event, ctx) => {
     const runKey = resolveRunKey(ctx as ToolContext);
+    api.logger.info(
+      `armoriq: [agent_start] runKey=${runKey} runId=${(ctx as ToolContext).runId} sessionKey=${(ctx as ToolContext).sessionKey}`,
+    );
     if (!runKey) {
       return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     }
@@ -1575,6 +1730,7 @@ export default function register(api: OpenClawPluginApi) {
         token: null,
         plan: { steps: [], metadata: { goal: "invalid" } },
         allowedActions: new Set(),
+        executedStepIndices: new Set(),
         createdAt: Date.now(),
         error: "ArmorIQ identity missing (userId/agentId)",
       });
@@ -1618,6 +1774,7 @@ export default function register(api: OpenClawPluginApi) {
         tokenPlan,
         plan: tokenPlan,
         allowedActions: extractAllowedActions(tokenPlan),
+        executedStepIndices: new Set<number>(),
         createdAt: Date.now(),
         expiresAt:
           typeof tokenParsed?.expiresAt === "number"
@@ -1626,6 +1783,10 @@ export default function register(api: OpenClawPluginApi) {
               ? token.expiresAt
               : undefined,
       });
+      const sessionKey = (ctx as ToolContext).sessionKey?.trim();
+      if (sessionKey && runKey !== sessionKey) {
+        sessionKeyIndex.set(sessionKey, runKey);
+      }
       return cfg.policyUpdateEnabled ? { prependContext: POLICY_UPDATE_INSTRUCTIONS } : undefined;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1633,6 +1794,7 @@ export default function register(api: OpenClawPluginApi) {
         token: null,
         plan: { steps: [], metadata: { goal: "invalid" } },
         allowedActions: new Set(),
+        executedStepIndices: new Set(),
         createdAt: Date.now(),
         error: `ArmorIQ planning failed: ${message}`,
       });
@@ -1643,7 +1805,15 @@ export default function register(api: OpenClawPluginApi) {
   api.on("agent_end", async (_event, ctx) => {
     const runKey = resolveRunKey(ctx as ToolContext);
     if (runKey) {
-      planCache.delete(runKey);
+      const indexed = sessionKeyIndex.get(runKey);
+      if (indexed) {
+        planCache.delete(indexed);
+        contextTokenExecutionCache.delete(indexed);
+        sessionKeyIndex.delete(runKey);
+      } else {
+        planCache.delete(runKey);
+        contextTokenExecutionCache.delete(runKey);
+      }
     }
   });
 
@@ -1651,6 +1821,10 @@ export default function register(api: OpenClawPluginApi) {
     const normalizedTool = normalizeToolName(event.toolName);
     const toolCtx = ctx as ToolContext;
     const intentTokenRaw = readString(toolCtx.intentTokenRaw);
+    const runKey = resolveRunKey(toolCtx);
+    api.logger.info(
+      `armoriq: [tool_call] tool=${normalizedTool} runKey=${runKey} runId=${toolCtx.runId} sessionKey=${toolCtx.sessionKey} cacheKeys=[${[...planCache.keys()].join(",")}]`,
+    );
     const policyCheck = async (): Promise<{ block: true; blockReason: string } | null> => {
       if (normalizedTool === "policy_update") {
         return null;
@@ -1666,9 +1840,7 @@ export default function register(api: OpenClawPluginApi) {
         const tokenDigest = policyStore.getCryptoTokenDigest();
         const verifyResult = cryptoPolicyService.verifyPolicyDigest(currentDigest, tokenDigest);
         if (!verifyResult.valid) {
-          api.logger.warn(
-            `armoriq: crypto policy verification failed: ${verifyResult.reason}`,
-          );
+          api.logger.warn(`armoriq: crypto policy verification failed: ${verifyResult.reason}`);
           return {
             block: true,
             blockReason: `ArmorIQ crypto policy mismatch: ${verifyResult.reason}`,
@@ -1677,7 +1849,9 @@ export default function register(api: OpenClawPluginApi) {
         api.logger.info?.(`armoriq: crypto policy digest verified`);
       }
 
-      const rawParams = isPlainObject(event.params) ? (event.params as Record<string, unknown>) : {};
+      const rawParams = isPlainObject(event.params)
+        ? (event.params as Record<string, unknown>)
+        : {};
       const sanitized = sanitizeParams(rawParams, cfg);
       const decision = evaluatePolicy({
         policy,
@@ -1726,20 +1900,26 @@ export default function register(api: OpenClawPluginApi) {
     const verifyWithIap = async (
       tokenRaw: string,
       plan: Record<string, unknown>,
-    ): Promise<{ block: true; blockReason: string } | null> => {
+      usedStepIndices?: Set<number>,
+    ): Promise<{ block: true; blockReason: string } | { block: false; stepIndex?: number }> => {
       const proofParse = parseCsrgProofHeaders(toolCtx);
       if (proofParse.error) {
         return { block: true, blockReason: proofParse.error };
       }
       let proofs = proofParse.proofs;
+      let resolvedStepIndex = parseStepIndexFromPath(proofs?.path) ?? undefined;
       if (!proofs) {
         const resolvedProofs = resolveCsrgProofsFromToken({
           intentTokenRaw: tokenRaw,
           plan,
           toolName: event.toolName,
           toolParams: event.params,
+          usedStepIndices,
         });
-        proofs = resolvedProofs ?? undefined;
+        if (resolvedProofs) {
+          proofs = resolvedProofs;
+          resolvedStepIndex = resolvedProofs.stepIndex;
+        }
       }
       const proofCount = proofs?.proof && Array.isArray(proofs.proof) ? proofs.proof.length : 0;
       api.logger.info(
@@ -1761,9 +1941,13 @@ export default function register(api: OpenClawPluginApi) {
         const parsed = JSON.parse(tokenRaw);
         if (parsed?.jwtToken) {
           verifyToken = parsed.jwtToken;
-          api.logger.info(`armoriq: using jwtToken for verification (length=${verifyToken.length})`);
+          api.logger.info(
+            `armoriq: using jwtToken for verification (length=${verifyToken.length})`,
+          );
         } else {
-          api.logger.warn(`armoriq: no jwtToken in token, using raw (keys=${Object.keys(parsed).join(',')})`);
+          api.logger.warn(
+            `armoriq: no jwtToken in token, using raw (keys=${Object.keys(parsed).join(",")})`,
+          );
         }
       } catch {
         api.logger.warn(`armoriq: failed to parse tokenRaw, using as-is`);
@@ -1793,10 +1977,11 @@ export default function register(api: OpenClawPluginApi) {
           blockReason: `ArmorIQ intent verification failed: ${message}`,
         };
       }
-      return null;
+      return { block: false, stepIndex: resolvedStepIndex };
     };
 
     if (intentTokenRaw) {
+      const contextUsedStepIndices = getContextTokenUsedStepIndices(runKey, intentTokenRaw);
       const tokenCheck = checkIntentTokenPlan({
         intentTokenRaw,
         toolName: event.toolName,
@@ -1815,9 +2000,16 @@ export default function register(api: OpenClawPluginApi) {
         if (policyResult) {
           return policyResult;
         }
-        const csrgResult = await verifyWithIap(intentTokenRaw, tokenCheck.plan ?? {});
-        if (csrgResult) {
+        const csrgResult = await verifyWithIap(
+          intentTokenRaw,
+          tokenCheck.plan ?? {},
+          contextUsedStepIndices,
+        );
+        if (csrgResult.block) {
           return csrgResult;
+        }
+        if (typeof csrgResult.stepIndex === "number") {
+          contextUsedStepIndices?.add(csrgResult.stepIndex);
         }
         const resultParams = tokenCheck.params ?? event.params;
         return resultParams ? { params: resultParams as Record<string, unknown> } : undefined;
@@ -1839,9 +2031,12 @@ export default function register(api: OpenClawPluginApi) {
         return policyResult;
       }
 
-      const csrgResult = await verifyWithIap(intentTokenRaw, { steps: [] });
-      if (csrgResult) {
+      const csrgResult = await verifyWithIap(intentTokenRaw, { steps: [] }, contextUsedStepIndices);
+      if (csrgResult.block) {
         return csrgResult;
+      }
+      if (typeof csrgResult.stepIndex === "number") {
+        contextUsedStepIndices?.add(csrgResult.stepIndex);
       }
       return event.params ? { params: event.params } : undefined;
     }
@@ -1858,7 +2053,6 @@ export default function register(api: OpenClawPluginApi) {
       };
     }
 
-    const runKey = resolveRunKey(toolCtx);
     if (!runKey) {
       return {
         block: true,
@@ -1866,7 +2060,7 @@ export default function register(api: OpenClawPluginApi) {
       };
     }
 
-    const cached = planCache.get(runKey);
+    const cached = planCache.get(runKey) ?? planCache.get(sessionKeyIndex.get(runKey) ?? "");
 
     if (!cached) {
       return {
@@ -1901,9 +2095,16 @@ export default function register(api: OpenClawPluginApi) {
         if (policyResult) {
           return policyResult;
         }
-        const csrgResult = await verifyWithIap(cached.tokenRaw, tokenCheck.plan ?? {});
-        if (csrgResult) {
+        const csrgResult = await verifyWithIap(
+          cached.tokenRaw,
+          tokenCheck.plan ?? {},
+          cached.executedStepIndices,
+        );
+        if (csrgResult.block) {
           return csrgResult;
+        }
+        if (typeof csrgResult.stepIndex === "number") {
+          cached.executedStepIndices.add(csrgResult.stepIndex);
         }
         return { params: tokenCheck.params ?? event.params };
       }

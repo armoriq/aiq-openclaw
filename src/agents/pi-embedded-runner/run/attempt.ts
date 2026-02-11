@@ -725,16 +725,37 @@ export async function runEmbeddedAttempt(
         let effectivePrompt = params.prompt;
         if (hookRunner?.hasHooks("before_agent_start")) {
           try {
+            const hookTools =
+              tools.length > 0
+                ? tools.map((tool) => ({
+                    name: tool.name || "tool",
+                    description: tool.description ?? "",
+                    parameters:
+                      tool.parameters && typeof tool.parameters === "object"
+                        ? (tool.parameters as Record<string, unknown>)
+                        : undefined,
+                  }))
+                : undefined;
             const hookResult = await hookRunner.runBeforeAgentStart(
               {
                 prompt: params.prompt,
                 messages: activeSession.messages,
+                tools: hookTools,
               },
               {
                 agentId: hookAgentId,
                 sessionKey: params.sessionKey,
                 workspaceDir: params.workspaceDir,
                 messageProvider: params.messageProvider ?? undefined,
+                messageChannel: runtimeChannel ?? undefined,
+                accountId: params.agentAccountId,
+                senderId: params.senderId ?? undefined,
+                senderName: params.senderName ?? undefined,
+                senderUsername: params.senderUsername ?? undefined,
+                senderE164: params.senderE164 ?? undefined,
+                runId: params.runId,
+                model: params.model,
+                modelRegistry: params.modelRegistry,
               },
             );
             if (hookResult?.prependContext) {

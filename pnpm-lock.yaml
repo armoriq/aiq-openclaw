@@ -181,9 +181,6 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@armoriq/sdk':
-        specifier: ^0.2.6
-        version: 0.2.6
       '@grammyjs/types':
         specifier: ^3.23.0
         version: 3.23.0
@@ -5556,7 +5553,7 @@ snapshots:
 
   '@armoriq/sdk@0.2.6':
     dependencies:
-      axios: 1.13.4(debug@4.4.3)
+      axios: 1.13.5(debug@4.4.3)
     transitivePeerDependencies:
       - debug
 

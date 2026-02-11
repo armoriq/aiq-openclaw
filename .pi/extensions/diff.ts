@@ -138,7 +138,7 @@ export default function (pi: ExtensionAPI) {
               statusColor = theme.fg("dim", f.status);
           }
           return {
-            value: f,
+            value: f.file,
             label: `${statusColor} ${f.file}`,
           };
         });
@@ -148,13 +148,16 @@ export default function (pi: ExtensionAPI) {
 
         const selectList = new SelectList(items, visibleRows, {
           selectedPrefix: (t) => theme.fg("accent", t),
-          selectedText: (t) => t, // Keep existing colors
+          selectedText: (t) => t,
           description: (t) => theme.fg("muted", t),
           scrollInfo: (t) => theme.fg("dim", t),
           noMatch: (t) => theme.fg("warning", t),
         });
         selectList.onSelect = (item) => {
-          void openSelected(item.value as FileInfo);
+          const fileInfo = files.find((f) => f.file === item.value);
+          if (fileInfo) {
+            void openSelected(fileInfo);
+          }
         };
         selectList.onCancel = () => done();
         selectList.onSelectionChange = (item) => {

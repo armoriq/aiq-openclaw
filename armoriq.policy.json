@@ -1,25 +1,9 @@
 {
-  "version": 36,
-  "updatedAt": "2026-02-06T20:05:23.144Z",
+  "version": 38,
+  "updatedAt": "2026-02-11T13:36:41.257Z",
   "updatedBy": "main",
   "policy": {
-    "rules": [
-      {
-        "id": "policy3",
-        "action": "deny",
-        "tool": "*"
-      },
-      {
-        "id": "policy2",
-        "action": "deny",
-        "tool": "*"
-      },
-      {
-        "id": "policy1",
-        "action": "deny",
-        "tool": "exec"
-      }
-    ]
+    "rules": []
   },
   "history": [
     {
@@ -676,6 +660,24 @@
             "tool": "exec"
           }
         ]
+      }
+    },
+    {
+      "version": 37,
+      "updatedAt": "2026-02-11T13:35:38.429Z",
+      "updatedBy": "main",
+      "reason": "Policy reset: Policy reset",
+      "policy": {
+        "rules": []
+      }
+    },
+    {
+      "version": 38,
+      "updatedAt": "2026-02-11T13:36:41.257Z",
+      "updatedBy": "main",
+      "reason": "Policy reset: Policy reset",
+      "policy": {
+        "rules": []
       }
     }
   ]
